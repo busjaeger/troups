@@ -9,6 +9,8 @@ import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.util.Bytes;
 
+import edu.illinois.htx.tm.HTXConstants;
+
 
 /**
  * <p>
@@ -79,7 +81,7 @@ public class HTXTable {
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
         delete.getRow(), ta.ts);
     setTransactionTimestamp(ta, hPut);
-    hPut.setAttribute("htx-del", Bytes.toBytes(true));
+    hPut.setAttribute(HTXConstants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);
@@ -89,6 +91,6 @@ public class HTXTable {
   private static void setTransactionTimestamp(Transaction ta,
       OperationWithAttributes operation) {
     byte[] tsBytes = Bytes.toBytes(ta.ts);
-    operation.setAttribute("htx-tts", tsBytes);
+    operation.setAttribute(HTXConstants.ATTR_NAME_TTS, tsBytes);
 }
 }

@@ -16,6 +16,7 @@ import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
 
+import edu.illinois.htx.tm.HTXConstants;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.VersionTracker;
 
@@ -54,7 +55,7 @@ public class HTXRegionObserver extends BaseRegionObserver {
     Long tts = getTransactionTimestamp(put);
     if (tts == null)
       return;
-    boolean isDelete = put.getAttribute("htx-del") != null;
+    boolean isDelete = put.getAttribute(HTXConstants.ATTR_NAME_DEL) != null;
     byte[] table = e.getEnvironment().getRegion().getTableDesc().getName();
     for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
       for (KeyValue kv : entries.getValue()) {
@@ -67,7 +68,7 @@ public class HTXRegionObserver extends BaseRegionObserver {
   }
 
   private static Long getTransactionTimestamp(OperationWithAttributes operation) {
-    byte[] tsBytes = operation.getAttribute("htx-tts");
+    byte[] tsBytes = operation.getAttribute(HTXConstants.ATTR_NAME_TTS);
     return tsBytes == null ? null : Bytes.toLong(tsBytes);
   }
 

@@ -10,6 +10,7 @@ import java.util.Iterator;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
+import org.apache.hadoop.hbase.Stoppable;
 import org.apache.hadoop.hbase.ipc.ProtocolSignature;
 
 /**
@@ -80,11 +81,13 @@ public class TransactionManager implements TransactionManagerInterface,
 
   // transient: would have to be reconstructed from the log after a crash
   private final NavigableMap<Long, Transaction> transactions;
+  private final Stoppable server;
 
-  public TransactionManager() {
+  public TransactionManager(Stoppable server) {
     this.tsOracle = new TimestampOracle();
     this.tLog = new TransactionLog();
     this.transactions = new TreeMap<Long, Transaction>();
+    this.server = server;
   }
 
   @Override
@@ -276,6 +279,16 @@ public class TransactionManager implements TransactionManagerInterface,
       throw new IllegalArgumentException("Transaction " + tts
           + " does not exist");
     return ta;
+  }
+
+  @Override
+  public void stop(String why) {
+    server.stop(why);
+  }
+
+  @Override
+  public boolean isStopped() {
+    return server.isStopped();
   }
 
 }
