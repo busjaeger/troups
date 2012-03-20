@@ -4,6 +4,8 @@ import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.master.HMaster;
+import org.apache.hadoop.hbase.master.HMasterCommandLine;
+import org.apache.hadoop.hbase.util.VersionInfo;
 import org.apache.zookeeper.KeeperException;
 
 /**
@@ -16,16 +18,24 @@ public class HTXMaster extends HMaster {
   public HTXMaster(Configuration conf) throws IOException, KeeperException,
       InterruptedException {
     super(conf);
-    this.tms = new TransactionManagerServer(conf);
+    try {
+      this.tms = new TransactionManagerServer(conf, getZooKeeper());
+    } catch (IOException e) {
+      e.printStackTrace();
+      throw e;
+    }
   }
 
   @Override
   public void run() {
+    System.out.println("Starting TransactionManagerServer");
     try {
       tms.start();
-    } catch (IOException e) {
+    } catch (Exception e) {
+      e.printStackTrace();
       throw new RuntimeException("Failed to start TransactionManagerServer", e);
     }
+    System.out.println("Started TransactionManagerServer");
     super.run();
   }
 
@@ -33,5 +43,10 @@ public class HTXMaster extends HMaster {
   public void stop(String why) {
     tms.stop(why);
     super.stop(why);
+  }
+
+  public static void main(String[] args) throws Exception {
+    VersionInfo.logVersion();
+    new HMasterCommandLine(HTXMaster.class).doMain(args);
   }
 }

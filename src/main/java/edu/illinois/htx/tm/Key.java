@@ -64,12 +64,30 @@ public class Key implements Writable {
 
   @Override
   public void write(DataOutput out) throws IOException {
-    // TODO
+    writeByteArray(table, out);
+    writeByteArray(row, out);
+    writeByteArray(family, out);
+    writeByteArray(qualifier, out);
+  }
+
+  private static void writeByteArray(byte[] b, DataOutput out)
+      throws IOException {
+    out.writeInt(b.length);
+    out.write(b);
   }
 
   @Override
   public void readFields(DataInput in) throws IOException {
-    // TODO
+    this.table = readByteArray(in);
+    this.row = readByteArray(in);
+    this.family = readByteArray(in);
+    this.qualifier = readByteArray(in);
   }
 
+  private static byte[] readByteArray(DataInput in) throws IOException {
+    int len = in.readInt();
+    byte[] b = new byte[len];
+    in.readFully(b);
+    return b;
+  }
 }

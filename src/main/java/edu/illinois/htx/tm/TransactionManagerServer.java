@@ -4,11 +4,17 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.Abortable;
 import org.apache.hadoop.hbase.HBaseConfiguration;
+import org.apache.hadoop.hbase.ServerName;
 import org.apache.hadoop.hbase.Stoppable;
+import org.apache.hadoop.hbase.ZooKeeperConnectionException;
 import org.apache.hadoop.hbase.ipc.HBaseRPC;
 import org.apache.hadoop.hbase.ipc.RpcServer;
+import org.apache.hadoop.hbase.zookeeper.ZKUtil;
+import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.net.DNS;
+import org.apache.zookeeper.KeeperException;
 
 /**
  * A server implementation for the TransactionManager. The server can be either
@@ -19,11 +25,35 @@ public class TransactionManagerServer implements Stoppable, Runnable {
 
   private final TransactionManager tm;
   private final RpcServer rpcServer;
+  private final ServerName serverName;
+  private final ZooKeeperWatcher zooKeeper;
   private volatile boolean stopped;
 
-  TransactionManagerServer(Configuration conf) throws IOException {
+  public TransactionManagerServer(Configuration conf)
+      throws ZooKeeperConnectionException, IOException {
+    this(conf, new ZooKeeperWatcher(conf, "TransactionManagerServer",
+        new Abortable() {
+          @Override
+          public boolean isAborted() {
+            // TODO
+            return false;
+          }
+
+          @Override
+          public void abort(String why, Throwable e) {
+            // TODO
+          }
+        }));
+  }
+
+  TransactionManagerServer(Configuration conf, ZooKeeperWatcher zooKeeper)
+      throws IOException {
     this.tm = new TransactionManager(this);
     this.rpcServer = createRpcServer(conf, tm);
+    InetSocketAddress isa = rpcServer.getListenerAddress();
+    this.serverName = new ServerName(isa.getHostName(), isa.getPort(),
+        System.currentTimeMillis());
+    this.zooKeeper = zooKeeper;
     this.stopped = true;
   }
 
@@ -47,6 +77,12 @@ public class TransactionManagerServer implements Stoppable, Runnable {
 
   void start() throws IOException {
     rpcServer.start();
+    try {
+      ZKUtil.createEphemeralNodeAndWatch(zooKeeper, "/hbase/tm",
+          serverName.getVersionedBytes());
+    } catch (KeeperException e) {
+      throw new IOException(e);
+    }
     synchronized (this) {
       stopped = false;
     }
@@ -90,9 +126,7 @@ public class TransactionManagerServer implements Stoppable, Runnable {
   public static void main(String[] args) throws IOException {
     Configuration conf = HBaseConfiguration.create();
     TransactionManagerServer tms = new TransactionManagerServer(conf);
-    Thread t = new Thread(tms, "TransactionManagerServer");
-    t.setDaemon(true);
-    t.start();
+    tms.run();
   }
 
 }

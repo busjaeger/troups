@@ -1,0 +1,49 @@
+How to install:
+
+0. Prereq: install and configure HBase 0.92 in pseudo distributed mode
+
+1. build htx jar
+  cd ${HTX_HOME}
+  mvn install -DskipTests
+
+2. copy jar to HBase installation
+  cp target/htx-0.0.1-SNAPSHOT.jar ${HBASE_HOME}/lib/
+
+3. build htx test jar
+  mvn jar:test-jar
+
+4. copy test jar to HBase installation
+  cp target/htx-0.0.1-SNAPSHOT-tests.jar ${HBASE_HOME}/lib/
+
+5. edit hbase-site.xml to configure HTX coprocessor:
+
+  <property>
+    <name>hbase.coprocessor.region.classes</name>
+    <value>edu.illinois.htx.regionserver.HTXRegionObserver</value>
+    <description>Installs the HTX coprocessor</description>
+  </property>
+
+6. start HDFS
+  cd ${HADOOP_HOME}
+  bin/start-dfs.sh
+
+7. start HBase
+  cd ${HBASE_HOME}
+  bin/start-hbase.sh
+
+8. start transaction manager (open new shell since process blocks)
+  bin/hbase edu.illinois.htx.tm.TransactionManagerServer
+
+9. create test table
+  bin/hbase shell
+  > create 'account', 'balance'
+  > exit
+
+10. run test case
+  bin/hbase edu.illinois.htx.client.SingleTableTest
+  (last printed line should be: 'succeeded')
+
+11. check account table
+  bin/hbase shell
+  > scan 'account', {VERIONS => 3}
+  (should print four cells: two for each row; one with timestamp=0, one with timestamp=1)

@@ -38,4 +38,10 @@ class LogRecord implements Writable {
     // TODO
   }
 
+  @Override
+  public String toString() {
+    return "LogRecord [sid=" + sid + ", tid=" + tid + ", type=" + type
+        + ", key=" + key + "]";
+  }
+
 }

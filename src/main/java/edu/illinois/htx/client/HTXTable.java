@@ -1,5 +1,6 @@
 package edu.illinois.htx.client;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map.Entry;
@@ -10,7 +11,6 @@ import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.htx.tm.HTXConstants;
-
 
 /**
  * <p>
@@ -32,7 +32,7 @@ import edu.illinois.htx.tm.HTXConstants;
  * mapping needs to be added here</li>
  * </ol>
  */
-public class HTXTable {
+public class HTXTable implements Closeable {
 
   private final HTable hTable;
 
@@ -92,5 +92,10 @@ public class HTXTable {
       OperationWithAttributes operation) {
     byte[] tsBytes = Bytes.toBytes(ta.ts);
     operation.setAttribute(HTXConstants.ATTR_NAME_TTS, tsBytes);
-}
+  }
+
+  @Override
+  public void close() throws IOException {
+    hTable.close();
+  }
 }

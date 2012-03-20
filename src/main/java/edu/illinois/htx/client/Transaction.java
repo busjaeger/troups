@@ -1,5 +1,7 @@
 package edu.illinois.htx.client;
 
+import java.io.IOException;
+
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 /**
@@ -15,11 +17,11 @@ public class Transaction {
     this.tm = tm;
   }
 
-  public void rollback() {
+  public void rollback() throws IOException {
     tm.rollback(this);
   }
 
-  public void commit() throws TransactionAbortedException {
+  public void commit() throws TransactionAbortedException, IOException {
     tm.commit(this);
   }
 

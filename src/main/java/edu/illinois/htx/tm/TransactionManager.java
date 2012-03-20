@@ -102,7 +102,9 @@ public class TransactionManager implements TransactionManagerInterface,
   }
 
   @Override
-  public synchronized long selectReadVersion(long tts, Key key) {
+  public synchronized long selectReadVersion(long tts, byte[] table, byte[] row, byte[] family,
+      byte[] qualifier) {
+    Key key = new Key(table, row, family, qualifier);
     Transaction ta = getTransaction(tts);
     if (ta.getState() != ACTIVE)
       // TODO abort here?
@@ -116,15 +118,17 @@ public class TransactionManager implements TransactionManagerInterface,
       // do not read from aborted transactions
       if (wta.getState() == ABORTED)
         continue;
-      // if value was deleted, treat like not found, but record read
+      // if value was deleted, treat like not found, but check read from
       if (wta.hasDeleted(key)) {
-        writer = wta;
+        if (wta.getState() != COMMITTED)
+          writer = wta;
         break;
       }
       // if value was written, remember timestamp and record read
       if (wta.hasWritten(key)) {
-        writer = wta;
         timestamp = wta.getTransactionTimestamp();
+        if (wta.getState() != COMMITTED)
+          writer = wta;
         break;
       }
     }
@@ -144,8 +148,10 @@ public class TransactionManager implements TransactionManagerInterface,
   }
 
   @Override
-  public synchronized void written(long tts, Key key)
+  public synchronized void written(long tts, byte[] table, byte[] row, byte[] family,
+      byte[] qualifier)
       throws TransactionAbortedException {
+    Key key = new Key(table, row, family, qualifier);
     Transaction ta = getTransaction(tts);
     // TODO check state here
     tLog.logWrite(tts, key);
@@ -154,8 +160,10 @@ public class TransactionManager implements TransactionManagerInterface,
   }
 
   @Override
-  public synchronized void deleted(long tts, Key key)
+  public synchronized void deleted(long tts, byte[] table, byte[] row, byte[] family,
+      byte[] qualifier)
       throws TransactionAbortedException {
+    Key key = new Key(table, row, family, qualifier);
     Transaction ta = getTransaction(tts);
     // TODO check state here
     tLog.logDelete(tts, key);
@@ -224,6 +232,8 @@ public class TransactionManager implements TransactionManagerInterface,
         }
         it.remove();
       }
+      System.out.println("Committed "+tts);
+      System.out.println(tLog.toString());
     }
   }
 

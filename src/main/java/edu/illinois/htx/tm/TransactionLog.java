@@ -54,4 +54,8 @@ class TransactionLog {
     log.add(new LogRecord(sid.incrementAndGet(), tts, type, key));
   }
 
+  @Override
+  public String toString() {
+    return log.toString();
+  }
 }

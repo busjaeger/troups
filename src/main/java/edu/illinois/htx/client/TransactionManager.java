@@ -1,29 +1,37 @@
 package edu.illinois.htx.client;
 
+import java.io.Closeable;
 import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 
 import edu.illinois.htx.tm.TransactionAbortedException;
 
-public class TransactionManager {
+public class TransactionManager implements Closeable {
 
-  private final edu.illinois.htx.tm.TransactionManagerInterface tm;
+  private final HTXConnection connection;
 
-  public TransactionManager(Configuration config) throws IOException {
-    this.tm = null;// TODO lookup
+  public TransactionManager(Configuration conf) throws IOException {
+    this.connection = HTXConnectionManager.getConnection(conf);
   }
 
-  public Transaction begin() {
-    return new Transaction(tm.begin(), this);
+  public Transaction begin() throws IOException {
+    long tts = connection.getTransactionManager().begin();
+    return new Transaction(tts, this);
   }
 
-  public void rollback(Transaction ta) {
-    tm.abort(ta.ts);
+  public void rollback(Transaction ta) throws IOException {
+    connection.getTransactionManager().abort(ta.ts);
   }
 
-  public void commit(Transaction ta) throws TransactionAbortedException {
-    tm.commit(ta.ts);
+  public void commit(Transaction ta) throws TransactionAbortedException,
+      IOException {
+    connection.getTransactionManager().commit(ta.ts);
+  }
+
+  @Override
+  public void close() throws IOException {
+    connection.close();
   }
 
 }

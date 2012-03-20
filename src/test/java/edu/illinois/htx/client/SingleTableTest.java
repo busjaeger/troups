@@ -26,6 +26,22 @@ public class SingleTableTest {
 
     Transaction ta = tm.begin();
     try {
+      Put put = new Put(row1).add(family, qualifier, toBytes(400L));
+      table.put(ta, put);
+      Put put2 = new Put(row2).add(family, qualifier, toBytes(600L));
+      table.put(ta, put2);
+      ta.commit();
+    } catch (TransactionAbortedException e) {
+      throw e;
+      // could retry here
+    } catch (Exception e) {
+      ta.rollback();
+      throw new IOException(e);
+      // could retry here
+    }
+
+    ta = tm.begin();
+    try {
       // read balance of first account
       Get get1 = new Get(row1).addColumn(family, qualifier);
       Result result1 = table.get(ta, get1);
@@ -44,11 +60,22 @@ public class SingleTableTest {
 
       ta.commit();
     } catch (TransactionAbortedException e) {
+      throw e;
       // could retry here
     } catch (Exception e) {
       ta.rollback();
+      throw new IOException(e);
       // could retry here
     }
+
+    table.close();
+    tm.close();
+  }
+
+  public static void main(String[] args) throws IOException {
+    SingleTableTest test = new SingleTableTest();
+    test.test();
+    System.out.println("succeeded");
   }
 
 }
