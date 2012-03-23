@@ -102,8 +102,8 @@ public class TransactionManager implements TransactionManagerInterface,
   }
 
   @Override
-  public synchronized long selectReadVersion(long tts, byte[] table, byte[] row, byte[] family,
-      byte[] qualifier) {
+  public synchronized long selectReadVersion(long tts, byte[] table,
+      byte[] row, byte[] family, byte[] qualifier) {
     Key key = new Key(table, row, family, qualifier);
     Transaction ta = getTransaction(tts);
     if (ta.getState() != ACTIVE)
@@ -120,22 +120,23 @@ public class TransactionManager implements TransactionManagerInterface,
         continue;
       // if value was deleted, treat like not found, but check read from
       if (wta.hasDeleted(key)) {
-        if (wta.getState() != COMMITTED)
-          writer = wta;
+        writer = wta;
         break;
       }
       // if value was written, remember timestamp and record read
       if (wta.hasWritten(key)) {
         timestamp = wta.getTransactionTimestamp();
-        if (wta.getState() != COMMITTED)
-          writer = wta;
+        writer = wta;
         break;
       }
     }
     tLog.logRead(tts, key);
     if (writer != null) {
-      ta.addReadFrom(writer);
-      writer.addReadBy(ta);
+      ta.addRead(key, writer.getTransactionTimestamp());
+      if (writer.getState() != COMMITTED) {
+        ta.addReadFrom(writer);
+        writer.addReadBy(ta);
+      }
     }
     /*
      * Note: it is possible that HBase contains a newer value the TM has not
@@ -148,9 +149,8 @@ public class TransactionManager implements TransactionManagerInterface,
   }
 
   @Override
-  public synchronized void written(long tts, byte[] table, byte[] row, byte[] family,
-      byte[] qualifier)
-      throws TransactionAbortedException {
+  public synchronized void written(long tts, byte[] table, byte[] row,
+      byte[] family, byte[] qualifier) throws TransactionAbortedException {
     Key key = new Key(table, row, family, qualifier);
     Transaction ta = getTransaction(tts);
     // TODO check state here
@@ -160,9 +160,8 @@ public class TransactionManager implements TransactionManagerInterface,
   }
 
   @Override
-  public synchronized void deleted(long tts, byte[] table, byte[] row, byte[] family,
-      byte[] qualifier)
-      throws TransactionAbortedException {
+  public synchronized void deleted(long tts, byte[] table, byte[] row,
+      byte[] family, byte[] qualifier) throws TransactionAbortedException {
     Key key = new Key(table, row, family, qualifier);
     Transaction ta = getTransaction(tts);
     // TODO check state here
@@ -232,7 +231,7 @@ public class TransactionManager implements TransactionManagerInterface,
         }
         it.remove();
       }
-      System.out.println("Committed "+tts);
+      System.out.println("Committed " + tts);
       System.out.println(tLog.toString());
     }
   }
