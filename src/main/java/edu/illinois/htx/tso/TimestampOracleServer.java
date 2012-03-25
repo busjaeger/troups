@@ -16,7 +16,7 @@ import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.net.DNS;
 import org.apache.zookeeper.KeeperException;
 
-import edu.illinois.htx.tm.HTXConstants;
+import edu.illinois.htx.HTXConstants;
 
 /**
  * A server implementation for the TimestampOracle.

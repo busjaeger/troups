@@ -10,7 +10,7 @@ import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import edu.illinois.htx.tm.HTXConstants;
+import edu.illinois.htx.HTXConstants;
 
 /**
  * <p>
@@ -45,8 +45,10 @@ public class HTXTable implements Closeable {
   }
 
   public Result get(Transaction ta, Get get) throws IOException {
+    byte[] row = get.getRow();
+    ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Get hGet = new org.apache.hadoop.hbase.client.Get(
-        get.getRow());
+        row);
     setTransactionTimestamp(ta, hGet);
     hGet.setTimeRange(0L, ta.id);
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
@@ -59,6 +61,8 @@ public class HTXTable implements Closeable {
   }
 
   public void put(Transaction ta, Put put) throws IOException {
+    byte[] row = put.getRow();
+    ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
         put.getRow(), ta.id);
     setTransactionTimestamp(ta, hPut);
@@ -78,6 +82,8 @@ public class HTXTable implements Closeable {
      * 
      * TODO: support other types of deletes (columns, family)
      */
+    byte[] row = delete.getRow();
+    ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
         delete.getRow(), ta.id);
     setTransactionTimestamp(ta, hPut);
@@ -91,7 +97,7 @@ public class HTXTable implements Closeable {
   private static void setTransactionTimestamp(Transaction ta,
       OperationWithAttributes operation) {
     byte[] tsBytes = Bytes.toBytes(ta.id);
-    operation.setAttribute(HTXConstants.ATTR_NAME_TTS, tsBytes);
+    operation.setAttribute(HTXConstants.ATTR_NAME_TID, tsBytes);
   }
 
   @Override

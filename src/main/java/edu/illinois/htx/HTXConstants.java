@@ -1,10 +1,10 @@
-package edu.illinois.htx.tm;
+package edu.illinois.htx;
 
 public interface HTXConstants {
 
   // internal constants
 
-  public static final String ATTR_NAME_TTS = "htx-tts";
+  public static final String ATTR_NAME_TID = "htx-tid";
 
   public static final String ATTR_NAME_DEL = "htx-del";
 
