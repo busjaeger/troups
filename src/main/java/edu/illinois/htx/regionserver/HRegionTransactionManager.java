@@ -36,8 +36,8 @@ import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
  * <li>support recovery
  * </ol>
  */
-public class CoprocessorTransactionManager extends BaseRegionObserver implements
-    CoprocessorTransactionManagerProtocol {
+public class HRegionTransactionManager extends BaseRegionObserver implements
+    HRegionTransactionManagerProtocol {
 
   private MVTOTransactionManager<HKey> tm;
 
@@ -100,11 +100,6 @@ public class CoprocessorTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void begin(long tid) {
-    tm.begin(tid);
-  }
-
-  @Override
   public void commit(long tid) throws TransactionAbortedException {
     tm.commit(tid);
   }
@@ -117,7 +112,7 @@ public class CoprocessorTransactionManager extends BaseRegionObserver implements
   @Override
   public long getProtocolVersion(String protocol, long clientVersion)
       throws IOException {
-    return CoprocessorTransactionManagerProtocol.VERSION;
+    return HRegionTransactionManagerProtocol.VERSION;
   }
 
   @Override

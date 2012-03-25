@@ -20,7 +20,7 @@ public class TimestampOracleClient implements TimestampOracleProtocol {
 
   @Override
   public long next() {
-    return ts.incrementAndGet();
+    return ts.getAndIncrement();
   }
 
   @Override

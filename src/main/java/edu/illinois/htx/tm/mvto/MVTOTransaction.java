@@ -20,7 +20,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   private final long id;
   private State state;
   private final List<KeyVersion<K>> reads;
-  private final List<K> writes;
+  private final Set<K> writes;
   private final Set<K> deletes;
   private final Set<MVTOTransaction<K>> readFrom;
   private final List<MVTOTransaction<K>> readBy;
@@ -29,7 +29,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     this.id = id;
     this.state = State.ACTIVE;
     this.reads = new ArrayList<KeyVersion<K>>();
-    this.writes = new ArrayList<K>();
+    this.writes = new HashSet<K>();
     this.deletes = new HashSet<K>();
     this.readFrom = new HashSet<MVTOTransaction<K>>(0);
     this.readBy = new ArrayList<MVTOTransaction<K>>(0);
@@ -81,7 +81,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     writes.add(key);
   }
 
-  List<K> getWrites() {
+  Iterable<K> getWrites() {
     return writes;
   }
 

@@ -117,7 +117,7 @@ public class MVTOTransactionManager<K extends Key> implements
     this.keyValueStore = keyValueStore;
     this.executorService = executorService;
     this.transactions = new HashMap<Long, MVTOTransaction<K>>();
-    this.transactionsByVersionsRead = new TreeMap<Key, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
+    this.transactionsByVersionsRead = new HashMap<Key, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
   }
 
   public ExecutorService getExecutorService() {
@@ -143,49 +143,54 @@ public class MVTOTransactionManager<K extends Key> implements
       Iterable<? extends KeyVersion<K>> versions) {
     MVTOTransaction<K> reader = getActiveTransaction(tid);
     Iterator<? extends KeyVersion<K>> it = versions.iterator();
-    while (it.hasNext()) {
+    if (it.hasNext()) {
       KeyVersion<K> kv = it.next();
-      K key = kv.getKey();
-      long version = kv.getVersion();
-      MVTOTransaction<K> writer = transactions.get(version);
+      outer: while (true) {
+        K key = kv.getKey();
+        long version = kv.getVersion();
+        MVTOTransaction<K> writer = transactions.get(version);
 
-      // if we don't have a TA, assume TA is committed and GC'ed
-      if (writer != null) {
-        switch (writer.getState()) {
-        case ACTIVE:
-        case BLOCKED:
-          // value not yet committed, add dependency in case writer aborts
-          writer.addReadBy(reader);
-          reader.addReadFrom(writer);
-          // value deleted
-          if (writer.hasDeleted(key))
+        // if we don't have a TA, assume TA is committed and GC'ed
+        if (writer != null) {
+          switch (writer.getState()) {
+          case ACTIVE:
+          case BLOCKED:
+            // value not yet committed, add dependency in case writer aborts
+            writer.addReadBy(reader);
+            reader.addReadFrom(writer);
+            // value deleted
+            if (writer.hasDeleted(key))
+              it.remove();
+            break;
+          case ABORTED:
+            // value written by aborted TA & not yet GC'ed, remove from results
             it.remove();
-          break;
-        case ABORTED:
-          // value written by aborted TA & not yet GC'ed, remove from results
+            continue;
+          case COMMITTED:
+            // value deleted, but not yet cleaned up
+            if (writer.hasDeleted(key))
+              it.remove();
+            break;
+          }
+        }
+
+        // TODO log read
+
+        // remember read so we can efficiently check write conflicts later
+        reader.addRead(kv);
+        index(key, version, reader);
+
+        // older versions not yet cleaned up, remove from results
+        while (it.hasNext()) {
+          KeyVersion<K> next = it.next();
+          if (kv.getVersion() != next.getVersion()) {
+            kv = next;
+            continue outer;
+          }
           it.remove();
-          continue;
-        case COMMITTED:
-          // value deleted, but not yet cleaned up
-          if (writer.hasDeleted(key))
-            it.remove();
-          break;
         }
-      }
-
-      // TODO log read
-
-      // remember read so we can efficiently check write conflicts later
-      reader.addRead(kv);
-      index(key, version, reader);
-
-      // older versions not yet cleaned up, remove from results
-      while (it.hasNext()) {
-        if (kv.getVersion() != it.next().getVersion()) {
-          it.previous();
-          break;
-        }
-        it.remove();
+        // no further elements
+        break;
       }
     }
   }
@@ -236,14 +241,6 @@ public class MVTOTransactionManager<K extends Key> implements
         }
       }
     }
-  }
-
-  @Override
-  public synchronized void begin(long tid) {
-    MVTOTransaction<K> ta = transactions.get(tid);
-    if (ta != null)
-      throw new IllegalStateException("Transaction " + tid + " already exists");
-    transactions.put(tid, ta);
   }
 
   @Override
@@ -310,8 +307,10 @@ public class MVTOTransactionManager<K extends Key> implements
       public void run() {
         synchronized (MVTOTransactionManager.this) {
           // writes were only kept around in case we abort
-          for (Iterator<?> it = ta.getWrites().iterator(); it.hasNext();)
+          for (Iterator<?> it = ta.getWrites().iterator(); it.hasNext();) {
+            it.next();
             it.remove();
+          }
           // deletes now actually need to be applied
           try {
             for (Iterator<K> it = ta.getDeletes().iterator(); it.hasNext();) {
@@ -406,7 +405,7 @@ public class MVTOTransactionManager<K extends Key> implements
   private MVTOTransaction<K> getTransaction(long tid) {
     MVTOTransaction<K> ta = transactions.get(tid);
     if (ta == null)
-      throw new IllegalStateException("Transaction " + tid + "does not exist");
+      transactions.put(tid, ta = new MVTOTransaction<K>(tid));
     return ta;
   }
 
