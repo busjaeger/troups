@@ -8,9 +8,11 @@ import java.util.Arrays;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.io.Writable;
 
+/**
+ * Could be made abstract to decouple from HBase row/family/qualifier triple
+ */
 public class Key implements Writable {
 
-  protected byte[] table;
   protected byte[] row;
   protected byte[] family;
   protected byte[] qualifier;
@@ -21,22 +23,17 @@ public class Key implements Writable {
     super();
   }
 
-  public Key(byte[] table, KeyValue keyValue) {
-    this.table = table;
-    this.row = keyValue.getRow();
-    this.family = keyValue.getFamily();
-    this.qualifier = keyValue.getQualifier();
+  public Key(KeyValue keyValue) {
+    this(keyValue.getRow(), keyValue.getFamily(), keyValue.getQualifier());
   }
 
-  public Key(byte[] table, byte[] row, byte[] family, byte[] qualifier) {
-    this.table = table;
+  public Key(byte[] row, byte[] family, byte[] qualifier) {
     this.row = row;
     this.family = family;
     this.qualifier = qualifier;
   }
 
   public Key(Key key) {
-    this.table = key.table;
     this.row = key.row;
     this.family = key.family;
     this.qualifier = key.qualifier;
@@ -46,8 +43,7 @@ public class Key implements Writable {
   public boolean equals(Object obj) {
     if (obj instanceof Key) {
       Key k = (Key) obj;
-      return Arrays.equals(table, k.table) && Arrays.equals(row, k.row)
-          && Arrays.equals(family, k.family)
+      return Arrays.equals(row, k.row) && Arrays.equals(family, k.family)
           && Arrays.equals(qualifier, k.qualifier);
     }
     return false;
@@ -56,15 +52,14 @@ public class Key implements Writable {
   @Override
   public int hashCode() {
     if (hash == null) {
-      hash = Arrays.hashCode(table) * Arrays.hashCode(row)
-          * Arrays.hashCode(family) * Arrays.hashCode(qualifier);
+      hash = Arrays.hashCode(row) * Arrays.hashCode(family)
+          * Arrays.hashCode(qualifier);
     }
     return hash;
   }
 
   @Override
   public void write(DataOutput out) throws IOException {
-    writeByteArray(table, out);
     writeByteArray(row, out);
     writeByteArray(family, out);
     writeByteArray(qualifier, out);
@@ -78,7 +73,6 @@ public class Key implements Writable {
 
   @Override
   public void readFields(DataInput in) throws IOException {
-    this.table = readByteArray(in);
     this.row = readByteArray(in);
     this.family = readByteArray(in);
     this.qualifier = readByteArray(in);

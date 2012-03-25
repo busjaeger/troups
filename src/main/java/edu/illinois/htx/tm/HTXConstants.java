@@ -10,12 +10,12 @@ public interface HTXConstants {
 
   // configuration properties
 
-  public static final String TM_PORT = "htx.tm.port";
+  public static final String TSO_PORT = "htx.tm.port";
 
-  public static final int DEFAULT_TM_PORT = 60001;
+  public static final int DEFAULT_TSO_PORT = 60001;
 
-  public static final String TM_HANDLER_COUNT = "htx.tm.handler.count";
+  public static final String TSO_HANDLER_COUNT = "htx.tm.handler.count";
 
-  public static final int DEFAULT_HANDLER_COUNT = 25;
+  public static final int DEFAULT_TSO_HANDLER_COUNT = 25;
 
 }

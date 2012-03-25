@@ -6,7 +6,7 @@ import java.io.IOException;
 
 import org.apache.hadoop.io.Writable;
 
-class LogRecord implements Writable {
+class TransactionLogRecord implements Writable {
 
   static enum Type {
     BEGIN, READ, WRITE, DELETE, COMMIT, ABORT;
@@ -21,7 +21,7 @@ class LogRecord implements Writable {
 
   final Key key;
 
-  LogRecord(long sid, long tid, Type type, Key key) {
+  TransactionLogRecord(long sid, long tid, Type type, Key key) {
     this.sid = sid;
     this.tid = tid;
     this.type = type;

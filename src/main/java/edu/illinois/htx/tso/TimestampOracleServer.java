@@ -1,4 +1,4 @@
-package edu.illinois.htx.tm;
+package edu.illinois.htx.tso;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -16,20 +16,20 @@ import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.net.DNS;
 import org.apache.zookeeper.KeeperException;
 
-/**
- * A server implementation for the TransactionManager. The server can be either
- * be run stand-alone in its own JVM or hosted in another server, such as the
- * HMaster.
- */
-public class TransactionManagerServer implements Stoppable, Runnable {
+import edu.illinois.htx.tm.HTXConstants;
 
-  private final TransactionManager tm;
+/**
+ * A server implementation for the TimestampOracle.
+ */
+public class TimestampOracleServer implements Stoppable, Runnable {
+
+  private final TimestampOracle tso;
   private final RpcServer rpcServer;
   private final ServerName serverName;
   private final ZooKeeperWatcher zooKeeper;
   private volatile boolean stopped;
 
-  public TransactionManagerServer(Configuration conf)
+  public TimestampOracleServer(Configuration conf)
       throws ZooKeeperConnectionException, IOException {
     this(conf, new ZooKeeperWatcher(conf, "TransactionManagerServer",
         new Abortable() {
@@ -46,10 +46,10 @@ public class TransactionManagerServer implements Stoppable, Runnable {
         }));
   }
 
-  TransactionManagerServer(Configuration conf, ZooKeeperWatcher zooKeeper)
+  TimestampOracleServer(Configuration conf, ZooKeeperWatcher zooKeeper)
       throws IOException {
-    this.tm = new TransactionManager(this);
-    this.rpcServer = createRpcServer(conf, tm);
+    this.tso = new TimestampOracle();
+    this.rpcServer = createRpcServer(conf, tso);
     InetSocketAddress isa = rpcServer.getListenerAddress();
     this.serverName = new ServerName(isa.getHostName(), isa.getPort(),
         System.currentTimeMillis());
@@ -57,19 +57,19 @@ public class TransactionManagerServer implements Stoppable, Runnable {
     this.stopped = true;
   }
 
-  static RpcServer createRpcServer(Configuration conf, TransactionManager tm)
+  static RpcServer createRpcServer(Configuration conf, TimestampOracle tm)
       throws IOException {
     String hostname = DNS.getDefaultHost(
         conf.get("hbase.master.dns.interface", "default"),
         conf.get("hbase.master.dns.nameserver", "default"));
-    int port = conf.getInt(HTXConstants.TM_PORT, HTXConstants.DEFAULT_TM_PORT);
+    int port = conf.getInt(HTXConstants.TSO_PORT, HTXConstants.DEFAULT_TSO_PORT);
     InetSocketAddress initialIsa = new InetSocketAddress(hostname, port);
     if (initialIsa.getAddress() == null)
       throw new IllegalArgumentException("Failed resolve of " + initialIsa);
-    int numHandlers = conf.getInt(HTXConstants.TM_HANDLER_COUNT,
-        HTXConstants.DEFAULT_HANDLER_COUNT);
-    RpcServer server = HBaseRPC.getServer(tm, new Class<?>[] {
-        TransactionManagerInterface.class, VersionTracker.class },
+    int numHandlers = conf.getInt(HTXConstants.TSO_HANDLER_COUNT,
+        HTXConstants.DEFAULT_TSO_HANDLER_COUNT);
+    RpcServer server = HBaseRPC.getServer(tm,
+        new Class<?>[] { TimestampOracleProtocol.class },
         initialIsa.getHostName(), initialIsa.getPort(), numHandlers, 0,
         conf.getBoolean("hbase.rpc.verbose", false), conf, 0);
     return server;
@@ -125,7 +125,7 @@ public class TransactionManagerServer implements Stoppable, Runnable {
 
   public static void main(String[] args) throws IOException {
     Configuration conf = HBaseConfiguration.create();
-    TransactionManagerServer tms = new TransactionManagerServer(conf);
+    TimestampOracleServer tms = new TimestampOracleServer(conf);
     tms.run();
   }
 

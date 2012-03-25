@@ -1,11 +1,10 @@
 package edu.illinois.htx.regionserver;
 
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Get;
@@ -14,33 +13,45 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
 import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
+import org.apache.hadoop.hbase.regionserver.InternalScanner;
+import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import edu.illinois.htx.client.HTXConnection;
-import edu.illinois.htx.client.HTXConnectionManager;
 import edu.illinois.htx.tm.HTXConstants;
-import edu.illinois.htx.tm.VersionTracker;
+import edu.illinois.htx.tm.TransactionManager;
 
+/**
+ * TODO:
+ * <ol>
+ * <li>add distributed transactions
+ * <li>support regions splits
+ * <li>pass region reference to TM so it can cleanup rows
+ * </ol>
+ */
 public class HTXRegionObserver extends BaseRegionObserver {
 
-  private HTXConnection connection;
+  private TransactionManager tm;
 
   @Override
   public void start(CoprocessorEnvironment e) throws IOException {
-    Configuration conf = e.getConfiguration();
-    this.connection = HTXConnectionManager.getConnection(conf);
-    System.out.println("HTXRegionObserver started");
+    // TODO initialize TransactionManager (may need to overwrite other methods)
   }
 
   @Override
   public void stop(CoprocessorEnvironment e) throws IOException {
-    this.connection.close();
-    System.out.println("HTXRegionObserver stopped");
   }
 
-  VersionTracker getVersionTracker() throws IOException {
-    return connection.getVersionTracker();
+  @Override
+  public void prePut(ObserverContext<RegionCoprocessorEnvironment> e, Put put,
+      WALEdit edit, boolean writeToWAL) throws IOException {
+    Long tts = getTransactionTimestamp(put);
+    if (tts == null)
+      return;
+    boolean isDelete = put.getAttribute(HTXConstants.ATTR_NAME_DEL) != null;
+    for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
+      for (KeyValue kv : entries.getValue())
+        tm.write(tts, kv, isDelete);
   }
 
   @Override
@@ -49,32 +60,10 @@ public class HTXRegionObserver extends BaseRegionObserver {
     Long tts = getTransactionTimestamp(get);
     if (tts == null)
       return;
-    byte[] table = e.getEnvironment().getRegion().getTableDesc().getName();
-    for (Iterator<KeyValue> it = results.iterator(); it.hasNext();) {
-      KeyValue kv = it.next();
-      long v = getVersionTracker().selectReadVersion(tts, table, kv.getRow(),
-          kv.getFamily(), kv.getQualifier());
-      if (v != kv.getTimestamp())
-        it.remove();
-    }
-  }
-
-  @Override
-  public void postPut(ObserverContext<RegionCoprocessorEnvironment> e, Put put,
-      WALEdit edit, boolean writeToWAL) throws IOException {
-    Long tts = getTransactionTimestamp(put);
-    if (tts == null)
-      return;
-    boolean isDelete = put.getAttribute(HTXConstants.ATTR_NAME_DEL) != null;
-    byte[] table = e.getEnvironment().getRegion().getTableDesc().getName();
-    for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
-      for (KeyValue kv : entries.getValue())
-        if (isDelete)
-          connection.getVersionTracker().deleted(tts, table, kv.getRow(),
-              kv.getFamily(), kv.getQualifier());
-        else
-          connection.getVersionTracker().written(tts, table, kv.getRow(),
-              kv.getFamily(), kv.getQualifier());
+    // TODO check if results are already sorted by HBase; and verify newer
+    // versions are sorted before older versions by Comparator
+    Collections.sort(results, KeyValue.COMPARATOR);
+    tm.filterReads(tts, results);
   }
 
   private static Long getTransactionTimestamp(OperationWithAttributes operation) {
@@ -82,4 +71,14 @@ public class HTXRegionObserver extends BaseRegionObserver {
     return tsBytes == null ? null : Bytes.toLong(tsBytes);
   }
 
+  @Override
+  public InternalScanner preCompact(
+      ObserverContext<RegionCoprocessorEnvironment> e, Store store,
+      InternalScanner scanner) {
+    if (e.getEnvironment().getRegion().getRegionInfo().isMetaTable()) {
+      return scanner;
+    } else {
+      return scanner;// TODO
+    }
+  }
 }

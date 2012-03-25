@@ -48,7 +48,7 @@ public class HTXTable implements Closeable {
     org.apache.hadoop.hbase.client.Get hGet = new org.apache.hadoop.hbase.client.Get(
         get.getRow());
     setTransactionTimestamp(ta, hGet);
-    hGet.setTimeRange(0L, ta.ts);
+    hGet.setTimeRange(0L, ta.id);
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
         .entrySet())
       for (byte[] column : entry.getValue())
@@ -60,7 +60,7 @@ public class HTXTable implements Closeable {
 
   public void put(Transaction ta, Put put) throws IOException {
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
-        put.getRow(), ta.ts);
+        put.getRow(), ta.id);
     setTransactionTimestamp(ta, hPut);
     for (List<KeyValue> kvl : put.getFamilyMap().values())
       for (KeyValue kv : kvl)
@@ -79,7 +79,7 @@ public class HTXTable implements Closeable {
      * TODO: support other types of deletes (columns, family)
      */
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
-        delete.getRow(), ta.ts);
+        delete.getRow(), ta.id);
     setTransactionTimestamp(ta, hPut);
     hPut.setAttribute(HTXConstants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
@@ -90,7 +90,7 @@ public class HTXTable implements Closeable {
 
   private static void setTransactionTimestamp(Transaction ta,
       OperationWithAttributes operation) {
-    byte[] tsBytes = Bytes.toBytes(ta.ts);
+    byte[] tsBytes = Bytes.toBytes(ta.id);
     operation.setAttribute(HTXConstants.ATTR_NAME_TTS, tsBytes);
   }
 

@@ -1,30 +1,17 @@
 package edu.illinois.htx.tm;
 
-import static edu.illinois.htx.tm.LogRecord.Type.ABORT;
-import static edu.illinois.htx.tm.LogRecord.Type.BEGIN;
-import static edu.illinois.htx.tm.LogRecord.Type.COMMIT;
-import static edu.illinois.htx.tm.LogRecord.Type.DELETE;
-import static edu.illinois.htx.tm.LogRecord.Type.READ;
-import static edu.illinois.htx.tm.LogRecord.Type.WRITE;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
-
-import edu.illinois.htx.tm.LogRecord.Type;
+import static edu.illinois.htx.tm.TransactionLogRecord.Type.ABORT;
+import static edu.illinois.htx.tm.TransactionLogRecord.Type.BEGIN;
+import static edu.illinois.htx.tm.TransactionLogRecord.Type.COMMIT;
+import static edu.illinois.htx.tm.TransactionLogRecord.Type.DELETE;
+import static edu.illinois.htx.tm.TransactionLogRecord.Type.READ;
+import static edu.illinois.htx.tm.TransactionLogRecord.Type.WRITE;
+import edu.illinois.htx.tm.TransactionLogRecord.Type;
 
 /*
  * TODO: persist log and enable recovery
  */
-class TransactionLog {
-
-  private final List<LogRecord> log;
-  private final AtomicLong sid;
-
-  TransactionLog() {
-    this.log = new ArrayList<LogRecord>();
-    this.sid = new AtomicLong(0L);
-  }
+public abstract class TransactionLog {
 
   void logBegin(long tts) {
     log(BEGIN, tts, null);
@@ -50,12 +37,6 @@ class TransactionLog {
     log(COMMIT, tts, null);
   }
 
-  private void log(Type type, long tts, Key key) {
-    log.add(new LogRecord(sid.incrementAndGet(), tts, type, key));
-  }
+  protected abstract void log(Type type, long tts, Key key);
 
-  @Override
-  public String toString() {
-    return log.toString();
-  }
 }

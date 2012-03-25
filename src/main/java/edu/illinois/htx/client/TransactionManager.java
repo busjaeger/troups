@@ -1,37 +1,32 @@
 package edu.illinois.htx.client;
 
-import java.io.Closeable;
 import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tso.TimestampOracleProtocol;
 
-public class TransactionManager implements Closeable {
+public class TransactionManager {
 
-  private final HTXConnection connection;
+  private final TimestampOracleProtocol tso;
 
   public TransactionManager(Configuration conf) throws IOException {
-    this.connection = HTXConnectionManager.getConnection(conf);
+    this.tso = TimestampOracleClient.getClient();
   }
 
   public Transaction begin() throws IOException {
-    long tts = connection.getTransactionManager().begin();
-    return new Transaction(tts, this);
+    long id = tso.next();
+    return new Transaction(id);
   }
 
   public void rollback(Transaction ta) throws IOException {
-    connection.getTransactionManager().abort(ta.ts);
+    ta.rollback();
   }
 
   public void commit(Transaction ta) throws TransactionAbortedException,
       IOException {
-    connection.getTransactionManager().commit(ta.ts);
-  }
-
-  @Override
-  public void close() throws IOException {
-    connection.close();
+    ta.commit();
   }
 
 }

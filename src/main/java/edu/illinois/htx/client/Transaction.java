@@ -1,28 +1,49 @@
 package edu.illinois.htx.client;
 
-import java.io.IOException;
+import org.apache.hadoop.hbase.client.HTable;
 
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.TransactionManagerProtocol;
 
 /**
  * Client-side representation of a transaction
  */
 public class Transaction {
 
-  final long ts;
-  final TransactionManager tm;
+  final long id;
 
-  Transaction(long ts, TransactionManager tm) {
-    this.ts = ts;
-    this.tm = tm;
+  HTable htable;
+  byte[] row;
+
+  Transaction(long id) {
+    this.id = id;
   }
 
-  public void rollback() throws IOException {
-    tm.rollback(this);
+  void enlist(HTable htable, byte[] row) {
+    // TODO fix
+    if (htable != null && htable != this.htable)
+      throw new IllegalStateException(
+          "Currently no support for cross-table transactions");
+    if (this.htable == null) {
+      this.htable = htable;
+      // TODO assumes right now that all rows are hosted by same region
+      this.row = row;
+      TransactionManagerProtocol tm = htable.coprocessorProxy(
+          TransactionManagerProtocol.class, row);
+      tm.begin(id);
+    }
   }
 
-  public void commit() throws TransactionAbortedException, IOException {
-    tm.commit(this);
+  public void rollback() {
+    TransactionManagerProtocol tm = htable.coprocessorProxy(
+        TransactionManagerProtocol.class, row);
+    tm.abort(id);
+  }
+
+  public void commit() throws TransactionAbortedException {
+    TransactionManagerProtocol tm = htable.coprocessorProxy(
+        TransactionManagerProtocol.class, row);
+    tm.commit(id);
   }
 
 }

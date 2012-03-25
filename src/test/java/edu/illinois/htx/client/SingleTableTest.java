@@ -69,7 +69,6 @@ public class SingleTableTest {
     }
 
     table.close();
-    tm.close();
   }
 
   public static void main(String[] args) throws IOException {

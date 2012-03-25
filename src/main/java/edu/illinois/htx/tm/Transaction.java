@@ -8,32 +8,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-class Transaction {
+class Transaction implements Comparable<Transaction> {
 
   public static enum State {
     ACTIVE, BLOCKED, ABORTED, COMMITTED;
   }
 
-  private final long tts;
+  private final long id;
   private State state;
-  private final Set<Key> written;
-  private final Set<Key> deleted;
-  private final Map<Key, Long> read;
+  private final Map<Key, Boolean> writes;
   private final Set<Transaction> readFrom;
   private final List<Transaction> readBy;
 
-  public Transaction(long tts) {
-    this.tts = tts;
+  public Transaction(long id) {
+    this.id = id;
     this.state = State.ACTIVE;
-    this.written = new HashSet<Key>();
-    this.deleted = new HashSet<Key>();
-    this.read = new HashMap<Key, Long>();
+    this.writes = new HashMap<Key, Boolean>();
     this.readFrom = new HashSet<Transaction>(0);
     this.readBy = new ArrayList<Transaction>(0);
   }
 
-  long getTransactionTimestamp() {
-    return this.tts;
+  long getID() {
+    return this.id;
   }
 
   void setState(State state) {
@@ -53,7 +49,7 @@ class Transaction {
     readFrom.remove(transaction);
   }
 
-  public Collection<Transaction> getReadFrom() {
+  Collection<Transaction> getReadFrom() {
     return readFrom;
   }
 
@@ -62,40 +58,34 @@ class Transaction {
     readBy.add(transaction);
   }
 
-  public List<Transaction> getReadBy() {
+  List<Transaction> getReadBy() {
     return readBy;
   }
 
-  void addDelete(Key key) {
-    deleted.add(key);
-  }
-
-  public Iterable<Key> getDeleted() {
-    return deleted;
+  void addWrite(Key key, boolean isDelete) {
+    writes.put(key, isDelete);
   }
 
   boolean hasDeleted(Key key) {
-    return deleted.contains(key);
+    return Boolean.TRUE == writes.get(key);
   }
 
-  void addWritten(Key key) {
-    written.add(key);
+  @Override
+  public int compareTo(Transaction ta) {
+    return Long.valueOf(id).compareTo(ta.id);
   }
 
-  boolean hasWritten(Key key) {
-    return written.contains(key);
+  @Override
+  public boolean equals(Object obj) {
+    if (obj == this)
+      return true;
+    if (!(obj instanceof Transaction))
+      return false;
+    return id == ((Transaction) obj).id;
   }
 
-  public Iterable<Key> getWritten() {
-    return written;
+  @Override
+  public int hashCode() {
+    return Long.valueOf(id).hashCode();
   }
-
-  void addRead(Key key, long timestamp) {
-    read.put(key, timestamp);
-  }
-
-  Long getTimestampRead(Key key) {
-    return read.get(key);
-  }
-
 }
