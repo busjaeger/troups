@@ -2,13 +2,11 @@ package edu.illinois.htx.tm.mvto;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.Map.Entry;
+
+import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyVersion;
@@ -22,7 +20,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   private final long id;
   private State state;
   private final List<KeyVersion<K>> reads;
-  private final Map<K, Boolean> writes;
+  private final List<K> writes;
+  private final Set<K> deletes;
   private final Set<MVTOTransaction<K>> readFrom;
   private final List<MVTOTransaction<K>> readBy;
 
@@ -30,7 +29,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     this.id = id;
     this.state = State.ACTIVE;
     this.reads = new ArrayList<KeyVersion<K>>();
-    this.writes = new HashMap<K, Boolean>();
+    this.writes = new ArrayList<K>();
+    this.deletes = new HashSet<K>();
     this.readFrom = new HashSet<MVTOTransaction<K>>(0);
     this.readBy = new ArrayList<MVTOTransaction<K>>(0);
   }
@@ -73,38 +73,28 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     reads.add(kv);
   }
 
-  public Iterable<KeyVersion<K>> getReads() {
+  public List<KeyVersion<K>> getReads() {
     return reads;
   }
 
+  void addWrite(K key) {
+    writes.add(key);
+  }
+
+  List<K> getWrites() {
+    return writes;
+  }
+
   void addDelete(K key) {
-    writes.put(key, true);
+    deletes.add(key);
   }
 
   boolean hasDeleted(K key) {
-    return Boolean.TRUE == writes.get(key);
+    return deletes.contains(key);
   }
 
   Iterable<K> getDeletes() {
-    return new Iterable<K>() {
-      @Override
-      public Iterator<K> iterator() {
-        return new FilteredKeyIterator<K, Boolean>(writes, true);
-      }
-    };
-  }
-
-  void addWrite(K key) {
-    writes.put(key, false);
-  }
-
-  Iterable<K> getWrites() {
-    return new Iterable<K>() {
-      @Override
-      public Iterator<K> iterator() {
-        return new FilteredKeyIterator<K, Boolean>(writes, false);
-      }
-    };
+    return deletes;
   }
 
   /**
@@ -113,7 +103,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
    * @return
    */
   Iterable<K> getMutations() {
-    return writes.keySet();
+    return Iterables.concat(writes, deletes);
   }
 
   @Override
@@ -136,54 +126,4 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return Long.valueOf(id).hashCode();
   }
 
-  static class FilteredKeyIterator<T, V> implements Iterator<T> {
-
-    private final Iterator<Entry<T, V>> it;
-    private final V value;
-    private T current = null;
-
-    FilteredKeyIterator(Map<T, V> map, V value) {
-      this.it = map.entrySet().iterator();
-      this.value = value;
-    }
-
-    @Override
-    public boolean hasNext() {
-      // hasNext has been called already
-      if (current != null)
-        return true;
-      // find next and remember
-      while (it.hasNext()) {
-        Entry<T, V> e = it.next();
-        if (value.equals(e.getValue())) {
-          current = e.getKey();
-          return true;
-        }
-      }
-      // no next found
-      return false;
-    }
-
-    @Override
-    public T next() {
-      // hasNext has not been called
-      if (current == null) {
-        // loop eventually fails or returns
-        while (true) {
-          Entry<T, V> e = it.next();
-          if (value.equals(e.getValue()))
-            return e.getKey();
-        }
-      }
-      // hasNext has been called > reset
-      T tmp = current;
-      current = null;
-      return tmp;
-    }
-
-    @Override
-    public void remove() {
-      it.remove();
-    }
-  }
 }
