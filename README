@@ -19,7 +19,7 @@ How to install:
 
   <property>
     <name>hbase.coprocessor.region.classes</name>
-    <value>edu.illinois.htx.regionserver.HTXRegionObserver</value>
+    <value>edu.illinois.htx.regionserver.HRegionTransactionManager</value>
     <description>Installs the HTX coprocessor</description>
   </property>
 
@@ -31,8 +31,9 @@ How to install:
   cd ${HBASE_HOME}
   bin/start-hbase.sh
 
-8. start transaction manager (open new shell since process blocks)
-  bin/hbase edu.illinois.htx.tm.TransactionManagerServer
+// skip this step right now, the client is hacked to generate the timestamp
+// 8. start transaction manager (open new shell since process blocks)
+//  bin/hbase edu.illinois.htx.tm.TransactionManagerServer
 
 9. create test table
   bin/hbase shell
