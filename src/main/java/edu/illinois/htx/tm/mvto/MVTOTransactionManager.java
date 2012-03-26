@@ -100,6 +100,8 @@ public class MVTOTransactionManager<K extends Key> implements
   // mutable state
   // transactions by transaction ID for efficient direct lookup
   private final NavigableMap<Long, MVTOTransaction<K>> transactions;
+
+  // mutable state cached for efficiency
   // transactions indexed by read versions for efficient conflict detection
   private final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> transactionsByVersionsRead;
   // last uncommitted transaction id
@@ -176,9 +178,8 @@ public class MVTOTransactionManager<K extends Key> implements
 
         // TODO log read
 
-        // remember read so we can efficiently check write conflicts later
-        reader.addRead(key, version);
-        addRead(key, version, reader);
+        // remember read for conflict detection
+        addRead(reader, key, version);
 
         // older versions not yet cleaned up, remove from results
         while (it.hasNext()) {
@@ -207,25 +208,20 @@ public class MVTOTransactionManager<K extends Key> implements
       throws TransactionAbortedException {
     MVTOTransaction<K> writer = getActiveTransaction(tid);
     // TODO log write for recovery
-    // 1. record write so we can clean it up if the TA aborts, filter deletes
-    // out for reads, and clean up deletes and older versions if TA commits
+
+    // record write so we can clean it up if the TA aborts. If it is a delete,
+    // we also use this information to filter deleted versions from reads
+    // results and to delete values from the underlying data store when the
+    // transaction commits
     writer.addWrite(key, isDelete);
-    // 2. enforce proper time-stamp ordering: abort transaction if needed
-    NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
-        .get(key);
-    if (versions != null) {
-      // reduce to versions that were written before this TA started
-      for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
-          writer.getID(), false).values()) {
-        // check if any version has been read by a TA that started after this TA
-        MVTOTransaction<K> reader = readers.higher(writer);
-        if (reader != null) {
-          abort(reader.getID());
-          throw new TransactionAbortedException("Transaction " + writer.getID()
-              + " cannot write, because " + reader
-              + " which started after it has already read an older version.");
-        }
-      }
+
+    // enforce proper time-stamp ordering: abort transaction if needed
+    if (hasYoungerReaderOfOlderWriter(key, writer)) {
+      abort(writer.getID());
+      throw new TransactionAbortedException(
+          "Transaction "
+              + writer.getID()
+              + " cannot write, because a newer transaction has already read an older value.");
     }
   }
 
@@ -357,7 +353,7 @@ public class MVTOTransactionManager<K extends Key> implements
             it.remove();
 
           // cascade abort to transactions that read from this one
-          // TODO: can this be done on a separate thread?
+          // TODO: can this really be done on a separate thread?
           it = ta.getReadBy().iterator();
           while (it.hasNext()) {
             MVTOTransaction<K> readBy = it.next();
@@ -415,13 +411,17 @@ public class MVTOTransactionManager<K extends Key> implements
   }
 
   /**
-   * Indexes the given transaction by the key version it read.
+   * Adds the read version to the transaction, but also indexes it for faster
+   * lookup during write conflict detection.
    * 
+   * @param ta
    * @param key
    * @param version
-   * @param ta
    */
-  private void addRead(K key, long version, MVTOTransaction<K> ta) {
+  private void addRead(MVTOTransaction<K> ta, K key, long version) {
+    // add to TA so we can remove it later
+    ta.addRead(key, version);
+    // now index it for efficient retrieval
     NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
         .get(key);
     if (versions == null)
@@ -433,28 +433,54 @@ public class MVTOTransactionManager<K extends Key> implements
     readers.add(ta);
   }
 
-  private void removeRead(K key, long version, MVTOTransaction<K> ta) {
+  /**
+   * Returns true if a transaction that started after the given writer read a
+   * version of the key written by a transaction that started before the writer.
+   * 
+   * @param key
+   * @param writer
+   * @return
+   */
+  private boolean hasYoungerReaderOfOlderWriter(K key, MVTOTransaction<K> writer) {
     NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
         .get(key);
     if (versions != null) {
-      NavigableSet<MVTOTransaction<K>> tas = versions.get(versions);
-      if (tas != null) {
-        tas.remove(ta);
-        if (tas.isEmpty()) {
-          versions.remove(versions);
-          if (versions.isEmpty())
-            transactionsByVersionsRead.remove(key);
-        }
+      // reduce to versions that were written before this TA started
+      for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
+          writer.getID(), false).values()) {
+        // check if any version has been read by a TA that started after this TA
+        return readers.higher(writer) != null;
       }
     }
+    return false;
   }
 
+  /**
+   * Removes all reads stored in this transaction from the index and from the
+   * transaction.
+   * 
+   * @param ta
+   */
   private void removeReads(MVTOTransaction<K> ta) {
-    Iterator<Entry<K, Long>> reads = ta.getReads().entrySet().iterator();
-    while (reads.hasNext()) {
-      Entry<K, Long> read = reads.next();
-      removeRead(read.getKey(), read.getValue(), ta);
-      reads.remove();
+    Iterator<Entry<K, Long>> it = ta.getReads().entrySet().iterator();
+    while (it.hasNext()) {
+      Entry<K, Long> e = it.next();
+      // first remove read from index
+      NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
+          .get(e.getKey());
+      if (versions != null) {
+        NavigableSet<MVTOTransaction<K>> tas = versions.get(e.getValue());
+        if (tas != null) {
+          tas.remove(ta);
+          if (tas.isEmpty()) {
+            versions.remove(e.getValue());
+            if (versions.isEmpty())
+              transactionsByVersionsRead.remove(e.getKey());
+          }
+        }
+      }
+      // then remove read from transaction
+      it.remove();
     }
   }
 
