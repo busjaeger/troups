@@ -1,15 +1,12 @@
 package edu.illinois.htx.tm.mvto;
 
-import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-import com.google.common.collect.Iterables;
-
 import edu.illinois.htx.tm.Key;
-import edu.illinois.htx.tm.KeyVersion;
 
 class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
@@ -19,20 +16,18 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   private final long id;
   private State state;
-  private final List<KeyVersion<K>> reads;
-  private final Set<K> writes;
-  private final Set<K> deletes;
+  private final Map<K, Long> reads;
+  private final Map<K, Boolean> writes;
   private final Set<MVTOTransaction<K>> readFrom;
-  private final List<MVTOTransaction<K>> readBy;
+  private final Set<MVTOTransaction<K>> readBy;
 
   public MVTOTransaction(long id) {
     this.id = id;
     this.state = State.ACTIVE;
-    this.reads = new ArrayList<KeyVersion<K>>();
-    this.writes = new HashSet<K>();
-    this.deletes = new HashSet<K>();
+    this.reads = new HashMap<K, Long>();
+    this.writes = new HashMap<K, Boolean>();
     this.readFrom = new HashSet<MVTOTransaction<K>>(0);
-    this.readBy = new ArrayList<MVTOTransaction<K>>(0);
+    this.readBy = new HashSet<MVTOTransaction<K>>(0);
   }
 
   long getID() {
@@ -65,45 +60,28 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     readBy.add(transaction);
   }
 
-  List<MVTOTransaction<K>> getReadBy() {
+  Collection<MVTOTransaction<K>> getReadBy() {
     return readBy;
   }
 
-  void addRead(KeyVersion<K> kv) {
-    reads.add(kv);
+  void addRead(K key, long version) {
+    reads.put(key, version);
   }
 
-  public List<KeyVersion<K>> getReads() {
+  public Map<K, Long> getReads() {
     return reads;
   }
 
-  void addWrite(K key) {
-    writes.add(key);
+  void addWrite(K key, boolean isDelete) {
+    writes.put(key, isDelete);
   }
 
-  Iterable<K> getWrites() {
+  Map<K, Boolean> getWrites() {
     return writes;
   }
 
-  void addDelete(K key) {
-    deletes.add(key);
-  }
-
   boolean hasDeleted(K key) {
-    return deletes.contains(key);
-  }
-
-  Iterable<K> getDeletes() {
-    return deletes;
-  }
-
-  /**
-   * writes and deletes
-   * 
-   * @return
-   */
-  Iterable<K> getMutations() {
-    return Iterables.concat(writes, deletes);
+    return Boolean.TRUE == writes.get(key);
   }
 
   @Override

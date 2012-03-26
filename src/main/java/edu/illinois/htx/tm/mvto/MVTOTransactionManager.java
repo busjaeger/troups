@@ -8,11 +8,14 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
@@ -76,21 +79,6 @@ import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
  * <li>set log check-points to delete old logs and enable faster recovery
  * <ol>
  * 
- * <li>Provide information that enables GC of old versions in the KeyValue store
- * 
- * <li>remove transaction objects from in-memory data structures when they are
- * no longer needed:
- * <ol>
- * <li>All transactions older than the youngest active transaction can be
- * removed from the versions-read index.
- * <li>Aborted transactions can be removed from the transaction map once all
- * written versions have been deleted.
- * <li>Committed transactions can be removed from the transaction map once 1.
- * all deleted versions have been deleted and 2. once all written versions have
- * been deleted, because they have been superseded. (question: is the second
- * condition really necessary)
- * </ol>
- * 
  * <li>reduce synchronization: break up single lock into multiple locks
  * 
  * <li>remove implementation assumptions (see above)
@@ -101,23 +89,30 @@ import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
  * </ol>
  */
 public class MVTOTransactionManager<K extends Key> implements
-    MultiversionTransactionManager<K> {
+    MultiversionTransactionManager<K>, Runnable {
 
-  // transactions by transaction ID for efficient direct lookup
-  private final Map<Long, MVTOTransaction<K>> transactions;
-  // transactions indexed by read versions for efficient conflict detection
-  private final Map<Key, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> transactionsByVersionsRead;
-  // executor for cleanup operations
-  private final ExecutorService executorService;
+  // immutable state
+  // executor for async operations
+  private final ScheduledExecutorService executorService;
   // key value store this TM is governing
   private final KeyValueStore<K> keyValueStore;
 
+  // mutable state
+  // transactions by transaction ID for efficient direct lookup
+  private final NavigableMap<Long, MVTOTransaction<K>> transactions;
+  // transactions indexed by read versions for efficient conflict detection
+  private final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> transactionsByVersionsRead;
+  // last uncommitted transaction id
+  private long firstActive;
+
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
-      ExecutorService executorService) {
+      ScheduledExecutorService executorService) {
     this.keyValueStore = keyValueStore;
     this.executorService = executorService;
-    this.transactions = new HashMap<Long, MVTOTransaction<K>>();
-    this.transactionsByVersionsRead = new HashMap<Key, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
+    this.executorService.scheduleAtFixedRate(this, 5, 1, TimeUnit.SECONDS);
+    this.firstActive = 0L;
+    this.transactions = new TreeMap<Long, MVTOTransaction<K>>();
+    this.transactionsByVersionsRead = new HashMap<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
   }
 
   public ExecutorService getExecutorService() {
@@ -126,6 +121,11 @@ public class MVTOTransactionManager<K extends Key> implements
 
   public KeyValueStore<K> getKeyValueStore() {
     return keyValueStore;
+  }
+
+  @Override
+  public long getFirstActiveTID() {
+    return firstActive;
   }
 
   /**
@@ -177,8 +177,8 @@ public class MVTOTransactionManager<K extends Key> implements
         // TODO log read
 
         // remember read so we can efficiently check write conflicts later
-        reader.addRead(kv);
-        index(key, version, reader);
+        reader.addRead(key, version);
+        addRead(key, version, reader);
 
         // older versions not yet cleaned up, remove from results
         while (it.hasNext()) {
@@ -203,27 +203,13 @@ public class MVTOTransactionManager<K extends Key> implements
    * @throws TransactionAbortedException
    */
   @Override
-  public synchronized void checkWrite(long tid, K key)
+  public synchronized void checkWriteConflict(long tid, K key, boolean isDelete)
       throws TransactionAbortedException {
     MVTOTransaction<K> writer = getActiveTransaction(tid);
     // TODO log write for recovery
-    // record write so we can clean it up if the TA aborts
-    writer.addWrite(key);
-    checkConflict(writer, key);
-  }
-
-  @Override
-  public void checkDelete(long tid, K key) throws TransactionAbortedException {
-    MVTOTransaction<K> writer = getActiveTransaction(tid);
-    // TODO log write for recovery
-    // record delete so we can clean it up if the TA aborts, filter it out for
-    // reads, and delete it and older versions if TA commits
-    writer.addDelete(key);
-    checkConflict(writer, key);
-  }
-
-  private void checkConflict(MVTOTransaction<K> writer, K key)
-      throws TransactionAbortedException {
+    // 1. record write so we can clean it up if the TA aborts, filter deletes
+    // out for reads, and clean up deletes and older versions if TA commits
+    writer.addWrite(key, isDelete);
     // 2. enforce proper time-stamp ordering: abort transaction if needed
     NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
         .get(key);
@@ -285,8 +271,8 @@ public class MVTOTransactionManager<K extends Key> implements
       @Override
       public void run() {
         synchronized (MVTOTransactionManager.this) {
-          for (Iterator<MVTOTransaction<K>> it = ta.getReadBy().iterator(); it
-              .hasNext();) {
+          Iterator<MVTOTransaction<K>> it = ta.getReadBy().iterator();
+          while (it.hasNext()) {
             MVTOTransaction<K> readBy = it.next();
             synchronized (readBy) {
               readBy.removeReadFrom(ta);
@@ -306,16 +292,16 @@ public class MVTOTransactionManager<K extends Key> implements
       @Override
       public void run() {
         synchronized (MVTOTransactionManager.this) {
-          // writes were only kept around in case we abort
-          for (Iterator<?> it = ta.getWrites().iterator(); it.hasNext();) {
-            it.next();
-            it.remove();
-          }
-          // deletes now actually need to be applied
+          // clean up writes and deletes
           try {
-            for (Iterator<K> it = ta.getDeletes().iterator(); it.hasNext();) {
-              K key = it.next();
-              keyValueStore.deleteVersions(key, tid);
+            for (Iterator<Entry<K, Boolean>> it = ta.getWrites().entrySet()
+                .iterator(); it.hasNext();) {
+              Entry<K, Boolean> e = it.next();
+              // remove deletes from data store so we don't have to keep this
+              // transaction around to filter reads
+              if (e.getValue())
+                keyValueStore.deleteVersions(e.getKey(), tid);
+              // writes were only kept around in case this TA aborts
               it.remove();
             }
           } catch (IOException e) {
@@ -334,12 +320,12 @@ public class MVTOTransactionManager<K extends Key> implements
   @Override
   public synchronized void abort(final long tid) {
     final MVTOTransaction<K> ta = getTransaction(tid);
-    boolean isBlocked = false;
+    boolean wasBlocked = false;
     switch (ta.getState()) {
     case ACTIVE:
       break;
     case BLOCKED:
-      isBlocked = true;
+      wasBlocked = true;
       break;
     case ABORTED:
       return;
@@ -350,19 +336,30 @@ public class MVTOTransactionManager<K extends Key> implements
 
     // TODO log abort
     ta.setState(ABORTED);
-    if (isBlocked) {
+    if (wasBlocked) {
       synchronized (ta) {
         ta.notify();
       }
     }
+
+    // This TA should no longer cause write conflicts, since it's aborted
+    removeReads(ta);
 
     // abort any transactions that read from this one
     executorService.submit(new Runnable() {
       @Override
       public void run() {
         synchronized (MVTOTransactionManager.this) {
-          for (Iterator<MVTOTransaction<K>> it = ta.getReadBy().iterator(); it
-              .hasNext();) {
+          // we can forget who we read from: will never commit and therefore
+          // never need to wait on the TAs we read from to complete
+          Iterator<MVTOTransaction<K>> it = ta.getReadFrom().iterator();
+          while (it.hasNext())
+            it.remove();
+
+          // cascade abort to transactions that read from this one
+          // TODO: can this be done on a separate thread?
+          it = ta.getReadBy().iterator();
+          while (it.hasNext()) {
             MVTOTransaction<K> readBy = it.next();
             synchronized (readBy) {
               readBy.removeReadFrom(ta);
@@ -370,6 +367,8 @@ public class MVTOTransactionManager<K extends Key> implements
             }
             it.remove();
           }
+
+          // TODO log cascading complete (or can this be derived from log?)
         }
       }
     });
@@ -379,21 +378,20 @@ public class MVTOTransactionManager<K extends Key> implements
       public void run() {
         synchronized (MVTOTransactionManager.this) {
           try {
-            for (Iterator<K> it = ta.getMutations().iterator(); it.hasNext();) {
+            Iterator<K> it = ta.getWrites().keySet().iterator();
+            while (it.hasNext()) {
               K key = it.next();
               keyValueStore.deleteVersion(key, tid);
               it.remove();
             }
           } catch (IOException e) {
             e.printStackTrace();
-            // TODO handle internal system errors: this causes memory leak
+            // TODO handle internal errors (e.g. retry) to avoid resource leaks
           }
-          // TODO log (once should be enough since delete idempotent)
+          // TODO log undo complete (once is enough since delete is idempotent)
         }
       }
     });
-
-    // TODO schedule clean up of all written rows - or handle as part of GC
   }
 
   /**
@@ -423,7 +421,7 @@ public class MVTOTransactionManager<K extends Key> implements
    * @param version
    * @param ta
    */
-  private void index(Key key, long version, MVTOTransaction<K> ta) {
+  private void addRead(K key, long version, MVTOTransaction<K> ta) {
     NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
         .get(key);
     if (versions == null)
@@ -435,4 +433,67 @@ public class MVTOTransactionManager<K extends Key> implements
     readers.add(ta);
   }
 
+  private void removeRead(K key, long version, MVTOTransaction<K> ta) {
+    NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = transactionsByVersionsRead
+        .get(key);
+    if (versions != null) {
+      NavigableSet<MVTOTransaction<K>> tas = versions.get(versions);
+      if (tas != null) {
+        tas.remove(ta);
+        if (tas.isEmpty()) {
+          versions.remove(versions);
+          if (versions.isEmpty())
+            transactionsByVersionsRead.remove(key);
+        }
+      }
+    }
+  }
+
+  private void removeReads(MVTOTransaction<K> ta) {
+    Iterator<Entry<K, Long>> reads = ta.getReads().entrySet().iterator();
+    while (reads.hasNext()) {
+      Entry<K, Long> read = reads.next();
+      removeRead(read.getKey(), read.getValue(), ta);
+      reads.remove();
+    }
+  }
+
+  // garbage collection
+  @Override
+  public void run() {
+    synchronized (this) {
+      boolean foundActive = false;
+      for (Iterator<MVTOTransaction<K>> it = transactions.values().iterator(); it
+          .hasNext();) {
+        MVTOTransaction<K> ta = it.next();
+        long tid = ta.getID();
+        switch (ta.getState()) {
+        case ACTIVE:
+        case BLOCKED:
+          if (!foundActive) {
+            foundActive = true;
+            firstActive = tid;
+          }
+          break;
+        case ABORTED:
+          // if readBy is empty (all TAs that read from it are aborted) and
+          // writes are empty (all written versions have been deleted)
+          // then we no longer need to keep this transaction around
+          if (ta.getReadBy().isEmpty() && ta.getWrites().isEmpty())
+            transactions.remove(tid);
+          break;
+        case COMMITTED:
+          // reads can only be cleaned up once all transactions that started
+          // before this one have completed
+          if (!foundActive) {
+            // we may have cleaned up reads on an ealier pass
+            removeReads(ta);
+            if (ta.getReadBy().isEmpty() && ta.getWrites().isEmpty())
+              transactions.remove(tid);
+          }
+          break;
+        }
+      }
+    }
+  }
 }

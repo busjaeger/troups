@@ -4,8 +4,8 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map.Entry;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.KeyValue;
@@ -45,7 +45,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   public void start(CoprocessorEnvironment e) throws IOException {
     HRegion region = ((RegionCoprocessorEnvironment) e).getRegion();
     HRegionKeyValueStore kvs = new HRegionKeyValueStore(region);
-    ExecutorService ex = Executors.newCachedThreadPool();
+    int count = e.getConfiguration().getInt(HTXConstants.TM_THREAD_COUNT,
+        HTXConstants.DEFAULT_TSO_HANDLER_COUNT);
+    ScheduledExecutorService ex = Executors.newScheduledThreadPool(count);
     this.tm = new MVTOTransactionManager<HKey>(kvs, ex);
   }
 
@@ -62,13 +64,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       return;
     boolean isDelete = put.getAttribute(HTXConstants.ATTR_NAME_DEL) != null;
     for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
-      for (KeyValue kv : entries.getValue()) {
-        HKey key = new HKey(kv);
-        if (isDelete)
-          tm.checkDelete(tid, key);
-        else
-          tm.checkWrite(tid, key);
-      }
+      for (KeyValue kv : entries.getValue())
+        tm.checkWriteConflict(tid, new HKey(kv), isDelete);
   }
 
   @Override
@@ -80,7 +77,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // TODO check if results are already sorted by HBase; and verify newer
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);
-    tm.filterReads(tts, Iterables.transform(results, HKeyVersion.KEYVALUE_TO_KEYVERSION));
+    Iterable<HKeyVersion> it = Iterables.transform(results,
+        HKeyVersion.KEYVALUE_TO_KEYVERSION);
+    tm.filterReads(tts, it);
   }
 
   private static Long getTID(OperationWithAttributes operation) {
