@@ -31,9 +31,9 @@ How to install:
   cd ${HBASE_HOME}
   bin/start-hbase.sh
 
-// skip this step right now, the client is hacked to generate the timestamp
-// 8. start transaction manager (open new shell since process blocks)
-//  bin/hbase edu.illinois.htx.tm.TransactionManagerServer
+// skip this step right now, the client is hacked to generate time-stamps
+// 8. start time-stamp oracle (open new shell since process blocks)
+//  bin/hbase edu.illinois.htx.tso.TimestampOracleServer
 
 9. create test table
   bin/hbase shell
