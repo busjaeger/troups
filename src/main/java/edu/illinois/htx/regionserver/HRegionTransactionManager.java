@@ -29,11 +29,12 @@ import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
 
 /**
- * TODO:
+ * TODO (in order of priority):
  * <ol>
- * <li>add distributed transactions
+ * <li>Implement internal scanner to delete unused versions during compaction
+ * <li>recover from server restarts and crashes
  * <li>support regions splits
- * <li>support recovery
+ * <li>add distributed transactions
  * </ol>
  */
 public class HRegionTransactionManager extends BaseRegionObserver implements

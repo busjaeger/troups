@@ -68,9 +68,10 @@ import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
  * <li>transactions always execute a read for a Key before writing/deleting it
  * </ol>
  * 
- * TODO:
+ * 
+ * TODO (in order of priority):
  * <ol>
- * <li>time out transactions
+ * <li>reduce synchronization: break up single lock into multiple locks
  * 
  * <li>recover from server restart or crash
  * <ol>
@@ -79,12 +80,12 @@ import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
  * <li>set log check-points to delete old logs and enable faster recovery
  * <ol>
  * 
- * <li>reduce synchronization: break up single lock into multiple locks
+ * <li>time out transactions
  * 
  * <li>remove implementation assumptions (see above)
  * 
- * <li>could alter policy to only read committed versions since this would
- * eliminate cascading aborts.
+ * <li>support alternate policy to only read committed versions (to eliminate
+ * cascading aborts)
  * 
  * </ol>
  */
@@ -262,7 +263,8 @@ public class MVTOTransactionManager<K extends Key> implements
     ta.setState(COMMITTED);
 
     // notify transactions that read from this one, that it committed (so they
-    // don't wait on it)
+    // don't wait on it): this has to be done after commit, since we don't want
+    // to notify and then fail before commit, so we do it asynchronously.
     executorService.submit(new Runnable() {
       @Override
       public void run() {
@@ -332,11 +334,10 @@ public class MVTOTransactionManager<K extends Key> implements
 
     // TODO log abort
     ta.setState(ABORTED);
-    if (wasBlocked) {
+    if (wasBlocked)
       synchronized (ta) {
         ta.notify();
       }
-    }
 
     // This TA should no longer cause write conflicts, since it's aborted
     removeReads(ta);
@@ -353,7 +354,6 @@ public class MVTOTransactionManager<K extends Key> implements
             it.remove();
 
           // cascade abort to transactions that read from this one
-          // TODO: can this really be done on a separate thread?
           it = ta.getReadBy().iterator();
           while (it.hasNext()) {
             MVTOTransaction<K> readBy = it.next();
