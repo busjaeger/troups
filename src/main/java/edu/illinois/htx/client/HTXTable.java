@@ -46,10 +46,10 @@ public class HTXTable implements Closeable {
 
   public Result get(Transaction ta, Get get) throws IOException {
     byte[] row = get.getRow();
-    ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Get hGet = new org.apache.hadoop.hbase.client.Get(
         row);
     setTransactionTimestamp(ta, hGet);
+    enlist(ta, row, hGet);
     hGet.setTimeRange(0L, ta.id);
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
         .entrySet())
@@ -62,9 +62,9 @@ public class HTXTable implements Closeable {
 
   public void put(Transaction ta, Put put) throws IOException {
     byte[] row = put.getRow();
-    ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
         put.getRow(), ta.id);
+    enlist(ta, row, hPut);
     setTransactionTimestamp(ta, hPut);
     for (List<KeyValue> kvl : put.getFamilyMap().values())
       for (KeyValue kv : kvl)
@@ -83,15 +83,20 @@ public class HTXTable implements Closeable {
      * TODO: support other types of deletes (columns, family)
      */
     byte[] row = delete.getRow();
-    ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
         delete.getRow(), ta.id);
+    enlist(ta, row, hPut);
     setTransactionTimestamp(ta, hPut);
     hPut.setAttribute(HTXConstants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);
     hTable.put(hPut);
+  }
+
+  private void enlist(Transaction ta, byte[] row, OperationWithAttributes op) {
+    if (ta.enlist(hTable, row))
+      op.setAttribute(HTXConstants.ATTR_NAME_BEG, Bytes.toBytes(true));
   }
 
   private static void setTransactionTimestamp(Transaction ta,

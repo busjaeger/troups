@@ -19,7 +19,13 @@ public class Transaction {
     this.id = id;
   }
 
-  void enlist(HTable hTable, byte[] row) {
+  /**
+   * 
+   * @param hTable
+   * @param row
+   * @return true if this is the first to enlist
+   */
+  boolean enlist(HTable hTable, byte[] row) {
     // TODO support distributed TAs
     if (!(this.hTable == null || this.hTable == hTable))
       throw new IllegalStateException(
@@ -28,7 +34,9 @@ public class Transaction {
       this.hTable = hTable;
       // TODO assumes right now that all rows are hosted by same region
       this.row = row;
+      return true;
     }
+    return false;
   }
 
   public void rollback() {

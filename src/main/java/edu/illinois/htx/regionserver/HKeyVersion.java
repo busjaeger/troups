@@ -22,6 +22,10 @@ public class HKeyVersion implements KeyVersion<HKey> {
     this(new HKey(kv), kv.getTimestamp());
   }
 
+  public HKeyVersion(byte[] row, byte[] family, byte[] qualifier, long version) {
+    this(new HKey(row, family, qualifier), version);
+  }
+
   public HKeyVersion(HKey key, long version) {
     this.key = key;
     this.version = version;

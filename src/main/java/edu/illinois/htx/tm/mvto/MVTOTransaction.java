@@ -16,6 +16,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   private final long id;
   private State state;
+  private boolean finalized;
   private final Map<K, Long> reads;
   private final Map<K, Boolean> writes;
   private final Set<MVTOTransaction<K>> readFrom;
@@ -40,6 +41,15 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   State getState() {
     return state;
+  }
+
+  void setFinalized() {
+    assert state == State.COMMITTED || state == State.ABORTED;
+    this.finalized = true;
+  }
+
+  boolean isFinalized() {
+    return finalized;
   }
 
   void addReadFrom(MVTOTransaction<K> transaction) {

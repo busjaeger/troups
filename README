@@ -4,7 +4,7 @@ How to install:
 
 1. build htx jar
   cd ${HTX_HOME}
-  mvn install -DskipTests
+  mvn install
 
 2. copy jar to HBase installation
   cp target/htx-0.0.1-SNAPSHOT.jar ${HBASE_HOME}/lib/

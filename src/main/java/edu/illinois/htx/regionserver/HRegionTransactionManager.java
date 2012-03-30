@@ -32,7 +32,8 @@ import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
  * TODO (in order of priority):
  * <ol>
  * <li>Implement internal scanner to delete unused versions during compaction
- * <li>recover from server restarts and crashes
+ * <li>orderly server shutdown
+ * <li>recover from server crashes
  * <li>support regions splits
  * <li>add distributed transactions
  * </ol>
@@ -49,7 +50,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int count = e.getConfiguration().getInt(HTXConstants.TM_THREAD_COUNT,
         HTXConstants.DEFAULT_TSO_HANDLER_COUNT);
     ScheduledExecutorService ex = Executors.newScheduledThreadPool(count);
-    this.tm = new MVTOTransactionManager<HKey>(kvs, ex);
+    HRegionTransactionLog tlog = new HRegionTransactionLog();
+    this.tm = new MVTOTransactionManager<HKey>(kvs, ex, tlog);
   }
 
   @Override
@@ -63,29 +65,39 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Long tid = getTID(put);
     if (tid == null)
       return;
-    boolean isDelete = put.getAttribute(HTXConstants.ATTR_NAME_DEL) != null;
+    if (getBoolean(put, HTXConstants.ATTR_NAME_BEG))
+      tm.begin(tid);
+    boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
     for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
       for (KeyValue kv : entries.getValue())
-        tm.checkWriteConflict(tid, new HKey(kv), isDelete);
+        tm.checkWrite(tid, new HKey(kv), isDelete);
   }
 
   @Override
   public void postGet(ObserverContext<RegionCoprocessorEnvironment> e, Get get,
       List<KeyValue> results) throws IOException {
-    Long tts = getTID(get);
-    if (tts == null)
+    Long tid = getTID(get);
+    if (tid == null)
       return;
+    if (getBoolean(get, HTXConstants.ATTR_NAME_BEG))
+      tm.begin(tid);
     // TODO check if results are already sorted by HBase; and verify newer
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);
     Iterable<HKeyVersion> it = Iterables.transform(results,
         HKeyVersion.KEYVALUE_TO_KEYVERSION);
-    tm.filterReads(tts, it);
+    tm.filterReads(tid, it);
   }
 
   private static Long getTID(OperationWithAttributes operation) {
     byte[] tsBytes = operation.getAttribute(HTXConstants.ATTR_NAME_TID);
     return tsBytes == null ? null : Bytes.toLong(tsBytes);
+  }
+
+  private static boolean getBoolean(OperationWithAttributes operation,
+      String name) {
+    byte[] bytes = operation.getAttribute(name);
+    return bytes == null ? false : Bytes.toBoolean(bytes);
   }
 
   @Override
@@ -97,6 +109,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     } else {
       return scanner;// TODO
     }
+  }
+
+  @Override
+  public void begin(long tid) {
+    tm.begin(tid);
   }
 
   @Override

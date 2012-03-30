@@ -7,12 +7,14 @@ import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 public class SingleTableTest {
 
+  @Ignore
   @Test
   public void test() throws IOException {
     byte[] row1 = toBytes("1");

@@ -8,6 +8,8 @@ public interface HTXConstants {
 
   public static final String ATTR_NAME_DEL = "htx-del";
 
+  public static final String ATTR_NAME_BEG = "htx-beg";
+
   // configuration properties
 
   public static final String TSO_PORT = "htx.tso.port";

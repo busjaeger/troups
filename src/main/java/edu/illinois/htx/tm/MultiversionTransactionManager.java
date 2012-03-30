@@ -6,7 +6,7 @@ public interface MultiversionTransactionManager<K extends Key> extends
 
   void filterReads(long tid, Iterable<? extends KeyVersion<K>> versions);
 
-  void checkWriteConflict(long tid, K key, boolean isDelete) throws TransactionAbortedException;
+  void checkWrite(long tid, K key, boolean isDelete) throws TransactionAbortedException;
 
   long getFirstActiveTID();
 
