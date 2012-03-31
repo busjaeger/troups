@@ -114,4 +114,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return Long.valueOf(id).hashCode();
   }
 
+  @Override
+  public String toString() {
+    return id + ":" + state + (finalized ? "(finalized)" : "");
+  }
 }

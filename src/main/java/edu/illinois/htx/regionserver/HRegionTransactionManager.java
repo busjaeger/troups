@@ -70,7 +70,19 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
     for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
       for (KeyValue kv : entries.getValue())
-        tm.checkWrite(tid, new HKey(kv), isDelete);
+        tm.preWrite(tid, new HKey(kv), isDelete);
+  }
+
+  @Override
+  public void postPut(ObserverContext<RegionCoprocessorEnvironment> e, Put put,
+      WALEdit edit, boolean writeToWAL) throws IOException {
+    Long tid = getTID(put);
+    if (tid == null)
+      return;
+    boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
+    for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
+      for (KeyValue kv : entries.getValue())
+        tm.postWrite(tid, new HKey(kv), isDelete);
   }
 
   @Override

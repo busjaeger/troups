@@ -108,8 +108,10 @@ public class MVTOTransactionManager<K extends Key> implements
   private final NavigableMap<Long, MVTOTransaction<K>> transactions;
   // last uncommitted transaction id
   private long firstActive;
-  // transactions indexed by read versions for efficient conflict detection
+  // TAs indexed by key and versions read for efficient conflict detection
   private final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> transactionsByVersionsRead;
+  // TAs indexed by key currently being written for efficient conflict detection
+  private final Map<K, NavigableSet<MVTOTransaction<K>>> writesInProgress;
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
       ScheduledExecutorService executorService, TransactionLog<K> transactionLog) {
@@ -118,6 +120,7 @@ public class MVTOTransactionManager<K extends Key> implements
     this.transactionLog = transactionLog;
     this.transactions = new TreeMap<Long, MVTOTransaction<K>>();
     this.transactionsByVersionsRead = new HashMap<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
+    this.writesInProgress = new HashMap<K, NavigableSet<MVTOTransaction<K>>>();
   }
 
   public ExecutorService getExecutorService() {
@@ -148,10 +151,12 @@ public class MVTOTransactionManager<K extends Key> implements
    * @param kvs
    *          MUST BE: sorted by key with newer versions ordered before older
    *          versions and all for the same row.
+   * @throws TransactionAbortedException
    */
   @Override
   public synchronized void filterReads(long tid,
-      Iterable<? extends KeyVersion<K>> versions) {
+      Iterable<? extends KeyVersion<K>> versions)
+      throws TransactionAbortedException {
     MVTOTransaction<K> reader = getActiveTransaction(tid);
     Iterator<? extends KeyVersion<K>> it = versions.iterator();
     if (it.hasNext()) {
@@ -159,8 +164,16 @@ public class MVTOTransactionManager<K extends Key> implements
       outer: while (true) {
         K key = kv.getKey();
         long version = kv.getVersion();
-        MVTOTransaction<K> writer = transactions.get(version);
 
+        // check if we have admitted a write that hasn't been applied yet
+        MVTOTransaction<K> lastWrite = getLatestWriteInProgressBefore(key,
+            reader);
+        if (lastWrite != null && lastWrite.getID() > version) {
+          abort(reader.getID());
+          throw new TransactionAbortedException("Passed writer");
+        }
+
+        MVTOTransaction<K> writer = transactions.get(version);
         // if we don't have a TA, assume TA is committed and GC'ed
         if (writer != null) {
           switch (writer.getState()) {
@@ -212,7 +225,7 @@ public class MVTOTransactionManager<K extends Key> implements
    * @throws TransactionAbortedException
    */
   @Override
-  public synchronized void checkWrite(long tid, K key, boolean isDelete)
+  public synchronized void preWrite(long tid, K key, boolean isDelete)
       throws TransactionAbortedException {
     MVTOTransaction<K> writer = getActiveTransaction(tid);
 
@@ -223,6 +236,9 @@ public class MVTOTransactionManager<K extends Key> implements
     transactionLog.appendWrite(tid, key, isDelete);
     writer.addWrite(key, isDelete);
 
+    // index transaction by key, so readers can check if write has been applied
+    addWriteInProgress(writer, key);
+
     // enforce proper time-stamp ordering: abort transaction if needed
     if (hasYoungerReaderOfOlderWriter(key, writer)) {
       abort(writer.getID());
@@ -231,6 +247,13 @@ public class MVTOTransactionManager<K extends Key> implements
               + writer.getID()
               + " cannot write, because a newer transaction has already read an older value.");
     }
+  }
+
+  @Override
+  public synchronized void postWrite(long tid, K key, boolean isDelete)
+      throws TransactionAbortedException {
+    MVTOTransaction<K> writer = getActiveTransaction(tid);
+    removeWriteInProgress(writer, key);
   }
 
   public synchronized void begin(final long tid) {
@@ -394,6 +417,7 @@ public class MVTOTransactionManager<K extends Key> implements
       Iterator<K> kit = ta.getWrites().keySet().iterator();
       while (kit.hasNext()) {
         K key = kit.next();
+        removeWriteInProgress(ta, key);
         keyValueStore.deleteVersion(key, tid);
         kit.remove();
       }
@@ -501,6 +525,28 @@ public class MVTOTransactionManager<K extends Key> implements
     }
   }
 
+  private void addWriteInProgress(MVTOTransaction<K> ta, K key) {
+    NavigableSet<MVTOTransaction<K>> writes = writesInProgress.get(key);
+    if (writes == null)
+      writesInProgress.put(key, writes = new TreeSet<MVTOTransaction<K>>());
+    writes.add(ta);
+  }
+
+  private MVTOTransaction<K> getLatestWriteInProgressBefore(K key,
+      MVTOTransaction<K> ta) {
+    NavigableSet<MVTOTransaction<K>> writes = writesInProgress.get(key);
+    return writes == null ? null : writes.lower(ta);
+  }
+
+  private void removeWriteInProgress(MVTOTransaction<K> ta, Key key) {
+    NavigableSet<MVTOTransaction<K>> writes = writesInProgress.get(key);
+    if (writes != null) {
+      writes.remove(ta);
+      if (writes.isEmpty())
+        writesInProgress.remove(key);
+    }
+  }
+
   // garbage collection
   @Override
   public void run() {
@@ -538,4 +584,5 @@ public class MVTOTransactionManager<K extends Key> implements
       }
     }
   }
+
 }
