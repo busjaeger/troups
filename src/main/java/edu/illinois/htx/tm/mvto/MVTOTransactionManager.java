@@ -225,35 +225,43 @@ public class MVTOTransactionManager<K extends Key> implements
    * @throws TransactionAbortedException
    */
   @Override
-  public synchronized void preWrite(long tid, K key, boolean isDelete)
-      throws TransactionAbortedException {
+  public synchronized void preWrite(long tid, boolean isDelete,
+      Iterable<? extends K> keys) throws TransactionAbortedException {
     MVTOTransaction<K> writer = getActiveTransaction(tid);
 
-    // record write so we can clean it up if the TA aborts. If it is a delete,
-    // we also use this information to filter deleted versions from reads
-    // results and to delete values from the underlying data store when the
-    // transaction commits
-    transactionLog.appendWrite(tid, key, isDelete);
-    writer.addWrite(key, isDelete);
+    for (K key : keys) {
+      /*
+       * record write so we can clean it up if the TA aborts. If it is a delete,
+       * we also use this information to filter deleted versions from reads
+       * results and to delete values from the underlying data store when the
+       * transaction commits
+       */
+      transactionLog.appendWrite(tid, key, isDelete);
+      writer.addWrite(key, isDelete);
 
-    // index transaction by key, so readers can check if write has been applied
-    addWriteInProgress(writer, key);
+      /*
+       * index transaction by key, so readers can check if this write has been
+       * applied and if not abort.
+       */
+      addWriteInProgress(writer, key);
 
-    // enforce proper time-stamp ordering: abort transaction if needed
-    if (hasYoungerReaderOfOlderWriter(key, writer)) {
-      abort(writer.getID());
-      throw new TransactionAbortedException(
-          "Transaction "
-              + writer.getID()
-              + " cannot write, because a newer transaction has already read an older value.");
+      // enforce proper time-stamp ordering: abort transaction if needed
+      if (hasYoungerReaderOfOlderWriter(key, writer)) {
+        abort(writer.getID());
+        throw new TransactionAbortedException(
+            "Transaction "
+                + writer.getID()
+                + " cannot write, because a newer transaction has already read an older value.");
+      }
     }
   }
 
   @Override
-  public synchronized void postWrite(long tid, K key, boolean isDelete)
-      throws TransactionAbortedException {
+  public synchronized void postWrite(long tid, boolean isDelete,
+      Iterable<? extends K> keys) throws TransactionAbortedException {
     MVTOTransaction<K> writer = getActiveTransaction(tid);
-    removeWriteInProgress(writer, key);
+    for (K key : keys)
+      removeWriteInProgress(writer, key);
   }
 
   public synchronized void begin(final long tid) {

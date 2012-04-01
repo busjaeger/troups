@@ -1,5 +1,6 @@
 package edu.illinois.htx.tm.mvto;
 
+import java.util.Arrays;
 import java.util.Iterator;
 
 import junit.framework.Assert;
@@ -37,6 +38,7 @@ public class MVTOTransactionManagerTest {
   public void testWriteConflict() throws TransactionAbortedException {
     // state in the data store
     StringKey key = new StringKey("x");
+    Iterable<StringKey> keys = Arrays.asList(key);
     long version = 0;
     kvs.writeVersion(key, version);
 
@@ -48,9 +50,10 @@ public class MVTOTransactionManagerTest {
     tm.filterReads(1, versions);
     tm.filterReads(2, versions);
 
+    
     kvs.writeVersion(key, 1);
     try {
-      tm.preWrite(1, key, false);
+      tm.preWrite(1, false, keys);
       Assert.fail("transaction 1 should have failed write check");
     } catch (TransactionAbortedException e) {
       // expected
@@ -58,7 +61,7 @@ public class MVTOTransactionManagerTest {
 
     kvs.writeVersion(key, 2);
     try {
-      tm.preWrite(2, key, false);
+      tm.preWrite(2, false, keys);
     } catch (TransactionAbortedException e) {
       e.printStackTrace();
       Assert.fail("tran 2 aborted unexpectedly");
@@ -81,6 +84,7 @@ public class MVTOTransactionManagerTest {
     // state in the data store
     StringKey key = new StringKey("x");
     long version = 0;
+    Iterable<StringKey> keys = Arrays.asList(key);
     kvs.writeVersion(key, version);
 
     tm.begin(1);
@@ -88,7 +92,7 @@ public class MVTOTransactionManagerTest {
 
     Iterable<StringKeyVersion> versions = kvs.readVersions(key);
     tm.filterReads(1, versions);
-    tm.preWrite(1, key, false);
+    tm.preWrite(1, false, keys);
 
     /*
      * transaction 2 executes a read AFTER we have admitted the write, but

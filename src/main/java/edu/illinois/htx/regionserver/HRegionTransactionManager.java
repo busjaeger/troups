@@ -22,6 +22,7 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
 
+import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.HTXConstants;
@@ -66,11 +67,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (tid == null)
       return;
     if (getBoolean(put, HTXConstants.ATTR_NAME_BEG))
-      tm.begin(tid);
+      begin(tid);
     boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
-    for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
-      for (KeyValue kv : entries.getValue())
-        tm.preWrite(tid, new HKey(kv), isDelete);
+    // create an HKey set view on the family map
+    Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
+        .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
+    tm.preWrite(tid, isDelete, keys);
   }
 
   @Override
@@ -80,9 +82,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (tid == null)
       return;
     boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
-    for (Entry<byte[], List<KeyValue>> entries : put.getFamilyMap().entrySet())
-      for (KeyValue kv : entries.getValue())
-        tm.postWrite(tid, new HKey(kv), isDelete);
+    Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
+        .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
+    tm.postWrite(tid, isDelete, keys);
   }
 
   @Override
@@ -92,7 +94,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (tid == null)
       return;
     if (getBoolean(get, HTXConstants.ATTR_NAME_BEG))
-      tm.begin(tid);
+      begin(tid);
     // TODO check if results are already sorted by HBase; and verify newer
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);
@@ -149,6 +151,16 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       long clientVersion, int clientMethodsHash) throws IOException {
     return new ProtocolSignature(getProtocolVersion(protocol, clientVersion),
         null);
+  }
+
+  static <F, T> Function<Iterable<F>, Iterable<T>> map(
+      final Function<? super F, ? extends T> function) {
+    return new Function<Iterable<F>, Iterable<T>>() {
+      @Override
+      public Iterable<T> apply(Iterable<F> it) {
+        return Iterables.transform(it, function);
+      }
+    };
   }
 
 }

@@ -8,10 +8,19 @@ import java.util.Arrays;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.io.Writable;
 
+import com.google.common.base.Function;
+
 import edu.illinois.htx.tm.Key;
 
 public class HKey implements Key, Writable {
 
+  static final Function<KeyValue, HKey> KEYVALUE_TO_KEY = new Function<KeyValue, HKey>() {
+    @Override
+    public HKey apply(KeyValue kv) {
+      return new HKey(kv);
+    }
+  };
+  
   protected byte[] row;
   protected byte[] family;
   protected byte[] qualifier;
