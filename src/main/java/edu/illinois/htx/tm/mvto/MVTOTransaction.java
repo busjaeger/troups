@@ -82,13 +82,14 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       /*
        * The following state changes can wake a blocked transaction: 1. the
        * read-from transaction aborted and cascaded its abort 2. the read-from
-       * transaction committed 2. the transaction manager was shut down
+       * transaction committed 2. the transaction manager was shut down and
+       * interrupted the commit
        */
       if (state == ABORTED)
         throw new TransactionAbortedException("Transaction " + id
             + " is victim of cascading abort");
-      if (!tm.isRunning())
-        throw new IllegalStateException("Transaction Manager stopped");
+      if (state == ACTIVE)
+        throw new IllegalStateException("Commit interrupted");
     }
 
     // record commit
@@ -404,7 +405,13 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     for (Iterator<Entry<K, Long>> it = reads.entrySet().iterator(); it
         .hasNext();) {
       Entry<K, Long> e = it.next();
-      tm.removeReader(e.getKey(), e.getValue(), this);
+      K key = e.getKey();
+      tm.lock(key);
+      try {
+        tm.removeReader(key, e.getValue(), this);
+      } finally {
+        tm.unlock(key);
+      }
       it.remove();
     }
   }

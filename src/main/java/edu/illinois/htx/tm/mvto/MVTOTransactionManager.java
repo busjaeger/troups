@@ -3,8 +3,10 @@ package edu.illinois.htx.tm.mvto;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.ABORTED;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.COMMITTED;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
@@ -155,6 +157,8 @@ public class MVTOTransactionManager<K extends Key> implements
   public void start() {
     runLock.writeLock().lock();
     try {
+      if (running)
+        return;
       replay();
       this.executorService.scheduleAtFixedRate(this, 5, 1, TimeUnit.SECONDS);
       running = true;
@@ -166,6 +170,8 @@ public class MVTOTransactionManager<K extends Key> implements
   public synchronized void stop() {
     runLock.writeLock().lock();
     try {
+      if (!running)
+        return;
       running = false;
       run();
       for (MVTOTransaction<K> ta : transactions.values())
@@ -173,27 +179,6 @@ public class MVTOTransactionManager<K extends Key> implements
     } finally {
       runLock.writeLock().unlock();
     }
-  }
-
-  Lock getLock() {
-    return runLock.readLock();
-  }
-
-  void lock(Key key) {
-    Lock keyLock = keyLocks.get(key);
-    if (keyLock == null) {
-      keyLock = new ReentrantLock();
-      Lock raceLock = keyLocks.putIfAbsent(key, keyLock);
-      if (raceLock != null)
-        keyLock = raceLock;
-    }
-    keyLock.lock();
-  }
-
-  void unlock(Key key) {
-    Lock keyLock = keyLocks.remove(key);
-    if (keyLock != null)
-      keyLock.unlock();
   }
 
   /**
@@ -211,7 +196,7 @@ public class MVTOTransactionManager<K extends Key> implements
   public void filterReads(final long tid,
       final Iterable<? extends KeyVersion<K>> versions)
       throws TransactionAbortedException {
-    new Operation<TransactionAbortedException>() {
+    new WithReadLock<TransactionAbortedException>() {
       @Override
       void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
         ta.afterRead(versions);
@@ -222,7 +207,7 @@ public class MVTOTransactionManager<K extends Key> implements
   @Override
   public synchronized void preWrite(final long tid, final boolean isDelete,
       final Iterable<? extends K> keys) throws TransactionAbortedException {
-    new Operation<TransactionAbortedException>() {
+    new WithReadLock<TransactionAbortedException>() {
       @Override
       void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
         ta.beforeWrite(isDelete, keys);
@@ -233,7 +218,7 @@ public class MVTOTransactionManager<K extends Key> implements
   @Override
   public synchronized void postWrite(final long tid, final boolean isDelete,
       final Iterable<? extends K> keys) throws TransactionAbortedException {
-    new Operation<TransactionAbortedException>() {
+    new WithReadLock<TransactionAbortedException>() {
       @Override
       void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
         ta.afterWrite(isDelete, keys);
@@ -242,7 +227,7 @@ public class MVTOTransactionManager<K extends Key> implements
   }
 
   public synchronized void begin(final long tid) {
-    new Operation<RuntimeException>() {
+    new WithReadLock<RuntimeException>() {
       void execute(long tid) {
         addTransaction(tid);
       };
@@ -251,7 +236,7 @@ public class MVTOTransactionManager<K extends Key> implements
 
   @Override
   public void commit(final long tid) throws TransactionAbortedException {
-    new Operation<TransactionAbortedException>() {
+    new WithReadLock<TransactionAbortedException>() {
       void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
         ta.commit();
         System.out.println("Committed " + tid);
@@ -261,7 +246,7 @@ public class MVTOTransactionManager<K extends Key> implements
 
   @Override
   public void abort(final long tid) {
-    new Operation<RuntimeException>() {
+    new WithReadLock<RuntimeException>() {
       void execute(MVTOTransaction<K> ta) {
         ta.abort();
         System.out.println("Aborted " + tid);
@@ -269,7 +254,7 @@ public class MVTOTransactionManager<K extends Key> implements
     }.run(tid);
   }
 
-  abstract class Operation<E extends Exception> {
+  abstract class WithReadLock<E extends Exception> {
     void run(long tid) throws E {
       runLock.readLock().lock();
       try {
@@ -292,6 +277,27 @@ public class MVTOTransactionManager<K extends Key> implements
     void execute(MVTOTransaction<K> ta) throws E {
       // overwrite
     }
+  }
+
+  Lock getLock() {
+    return runLock.readLock();
+  }
+
+  void lock(Key key) {
+    Lock keyLock = keyLocks.get(key);
+    if (keyLock == null) {
+      keyLock = new ReentrantLock();
+      Lock raceLock = keyLocks.putIfAbsent(key, keyLock);
+      if (raceLock != null)
+        keyLock = raceLock;
+    }
+    keyLock.lock();
+  }
+
+  void unlock(Key key) {
+    Lock keyLock = keyLocks.remove(key);
+    if (keyLock != null)
+      keyLock.unlock();
   }
 
   /**
@@ -319,6 +325,20 @@ public class MVTOTransactionManager<K extends Key> implements
       ta.begin();
       transactions.put(tid, ta);
     }
+  }
+
+  MVTOTransaction<K> removeTransaction(MVTOTransaction<K> ta) {
+    synchronized (transactions) {
+      return transactions.remove(ta.getID());
+    }
+  }
+
+  Iterable<MVTOTransaction<K>> getTransactions() {
+    List<MVTOTransaction<K>> snapshot;
+    synchronized (transactions) {
+      snapshot = new ArrayList<MVTOTransaction<K>>(transactions.values());
+    }
+    return snapshot;
   }
 
   // must be called with key lock held
@@ -401,37 +421,32 @@ public class MVTOTransactionManager<K extends Key> implements
   // garbage collection
   @Override
   public void run() {
-    synchronized (transactions) {
-      boolean foundActive = false;
-      for (Iterator<MVTOTransaction<K>> it = transactions.values().iterator(); it
-          .hasNext();) {
-        MVTOTransaction<K> ta = it.next();
-        long tid = ta.getID();
-        switch (ta.getState()) {
-        case ACTIVE:
-        case BLOCKED:
-          if (!foundActive) {
-            foundActive = true;
-            firstActive = tid;
-          }
-          break;
-        case ABORTED:
-          // if readBy is empty (all TAs that read from it are aborted) and
-          // writes are empty (all written versions have been deleted)
-          // then we no longer need to keep this transaction around
-          if (ta.isFinalized())
-            it.remove();
-          break;
-        case COMMITTED:
-          // reads can only be cleaned up once all transactions that started
-          // before this one have completed
-          if (!foundActive) {
-            ta.removeReads();
-            if (ta.isFinalized())
-              it.remove();
-          }
-          break;
+    boolean foundActive = false;
+    for (MVTOTransaction<K> ta : getTransactions()) {
+      switch (ta.getState()) {
+      case ACTIVE:
+      case BLOCKED:
+        if (!foundActive) {
+          foundActive = true;
+          firstActive = ta.getID();
         }
+        break;
+      case ABORTED:
+        // if readBy is empty (all TAs that read from it are aborted) and
+        // writes are empty (all written versions have been deleted)
+        // then we no longer need to keep this transaction around
+        if (ta.isFinalized())
+          removeTransaction(ta);
+        break;
+      case COMMITTED:
+        // reads can only be cleaned up once all transactions that started
+        // before this one have completed
+        if (!foundActive) {
+          ta.removeReads();
+          if (ta.isFinalized())
+            removeTransaction(ta);
+        }
+        break;
       }
     }
   }
