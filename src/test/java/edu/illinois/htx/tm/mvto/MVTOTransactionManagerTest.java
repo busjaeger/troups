@@ -13,7 +13,7 @@ import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import edu.illinois.htx.test.InMemoryTransactionLog;
+import edu.illinois.htx.test.StringKeyTransactionLog;
 import edu.illinois.htx.test.SequentialExecutorService;
 import edu.illinois.htx.test.StringKey;
 import edu.illinois.htx.test.StringKeyValueStore;
@@ -25,13 +25,13 @@ public class MVTOTransactionManagerTest {
   private MVTOTransactionManager<StringKey> tm;
   private StringKeyValueStore kvs;
   private SequentialExecutorService ses;
-  private InMemoryTransactionLog log;
+  private StringKeyTransactionLog log;
 
   @Before
   public void before() {
     kvs = new StringKeyValueStore();
     ses = new SequentialExecutorService();
-    log = new InMemoryTransactionLog();
+    log = new StringKeyTransactionLog();
     tm = new MVTOTransactionManager<StringKey>(kvs, ses, log);
     tm.start();
   }
