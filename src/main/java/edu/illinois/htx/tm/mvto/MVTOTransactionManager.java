@@ -214,7 +214,7 @@ public class MVTOTransactionManager<K extends Key> implements
     new Operation<TransactionAbortedException>() {
       @Override
       void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
-        ta.read(versions);
+        ta.afterRead(versions);
       }
     }.run(tid);
   }
@@ -244,19 +244,7 @@ public class MVTOTransactionManager<K extends Key> implements
   public synchronized void begin(final long tid) {
     new Operation<RuntimeException>() {
       void execute(long tid) {
-        synchronized (transactions) {
-          if (transactions.get(tid) != null)
-            throw new IllegalStateException("Transaction " + tid
-                + " already started");
-          if (!transactions.isEmpty()
-              && transactions.lastEntry().getKey() > tid)
-            throw new IllegalArgumentException("Transaction ID " + tid
-                + " has already been used");
-          MVTOTransaction<K> ta = new MVTOTransaction<K>(tid,
-              MVTOTransactionManager.this);
-          ta.begin();
-          transactions.put(tid, ta);
-        }
+        addTransaction(tid);
       };
     }.run(tid);
   }
@@ -315,6 +303,21 @@ public class MVTOTransactionManager<K extends Key> implements
   MVTOTransaction<K> getTransaction(long tid) {
     synchronized (transactions) {
       return transactions.get(tid);
+    }
+  }
+
+  void addTransaction(long tid) {
+    synchronized (transactions) {
+      if (transactions.get(tid) != null)
+        throw new IllegalStateException("Transaction " + tid
+            + " already started");
+      if (!transactions.isEmpty() && transactions.lastEntry().getKey() > tid)
+        throw new IllegalArgumentException("Transaction ID " + tid
+            + " has already been used");
+      MVTOTransaction<K> ta = new MVTOTransaction<K>(tid,
+          MVTOTransactionManager.this);
+      ta.begin();
+      transactions.put(tid, ta);
     }
   }
 

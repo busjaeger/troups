@@ -233,7 +233,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   // TODO lock/unlock should be in finally blocks
-  synchronized void read(Iterable<? extends KeyVersion<K>> versions)
+  synchronized void afterRead(Iterable<? extends KeyVersion<K>> versions)
       throws TransactionAbortedException {
     // check state
     switch (state) {
