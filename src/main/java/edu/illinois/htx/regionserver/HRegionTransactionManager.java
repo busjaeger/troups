@@ -3,7 +3,6 @@ package edu.illinois.htx.regionserver;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map.Entry;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -15,6 +14,7 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
 import org.apache.hadoop.hbase.coprocessor.ObserverContext;
 import org.apache.hadoop.hbase.coprocessor.RegionCoprocessorEnvironment;
+import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.ipc.ProtocolSignature;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
@@ -52,12 +52,19 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         HTXConstants.DEFAULT_TSO_HANDLER_COUNT);
     ScheduledExecutorService ex = Executors.newScheduledThreadPool(count);
     HRegionTransactionLog tlog = new HRegionTransactionLog();
-    this.tm = new MVTOTransactionManager<HKey>(kvs, ex, tlog);
+    tm = new MVTOTransactionManager<HKey>(kvs, ex, tlog);
   }
 
   @Override
-  public void stop(CoprocessorEnvironment e) throws IOException {
-    this.tm.getExecutorService().shutdown();
+  public void preOpen(ObserverContext<RegionCoprocessorEnvironment> e) {
+    tm.start();
+  }
+
+  @Override
+  public void postClose(ObserverContext<RegionCoprocessorEnvironment> e,
+      boolean abortRequested) {
+    tm.stop();
+    tm.getExecutorService().shutdown();
   }
 
   @Override
@@ -88,6 +95,18 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
+  public void preGet(ObserverContext<RegionCoprocessorEnvironment> e, Get get,
+      List<KeyValue> results) throws IOException {
+    Long tid = getTID(get);
+    if (tid == null)
+      return;
+    TimeRange tr = get.getTimeRange();
+    if (tr.getMin() != 0L || tr.getMax() != tid)
+      throw new IllegalArgumentException("Timerange should be "
+          + new TimeRange(0L, tid) + " but is " + tr);
+  }
+
+  @Override
   public void postGet(ObserverContext<RegionCoprocessorEnvironment> e, Get get,
       List<KeyValue> results) throws IOException {
     Long tid = getTID(get);
@@ -101,17 +120,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Iterable<HKeyVersion> it = Iterables.transform(results,
         HKeyVersion.KEYVALUE_TO_KEYVERSION);
     tm.filterReads(tid, it);
-  }
-
-  private static Long getTID(OperationWithAttributes operation) {
-    byte[] tsBytes = operation.getAttribute(HTXConstants.ATTR_NAME_TID);
-    return tsBytes == null ? null : Bytes.toLong(tsBytes);
-  }
-
-  private static boolean getBoolean(OperationWithAttributes operation,
-      String name) {
-    byte[] bytes = operation.getAttribute(name);
-    return bytes == null ? false : Bytes.toBoolean(bytes);
   }
 
   @Override
@@ -151,6 +159,17 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       long clientVersion, int clientMethodsHash) throws IOException {
     return new ProtocolSignature(getProtocolVersion(protocol, clientVersion),
         null);
+  }
+
+  private static Long getTID(OperationWithAttributes operation) {
+    byte[] tsBytes = operation.getAttribute(HTXConstants.ATTR_NAME_TID);
+    return tsBytes == null ? null : Bytes.toLong(tsBytes);
+  }
+
+  private static boolean getBoolean(OperationWithAttributes operation,
+      String name) {
+    byte[] bytes = operation.getAttribute(name);
+    return bytes == null ? false : Bytes.toBoolean(bytes);
   }
 
   static <F, T> Function<Iterable<F>, Iterable<T>> map(

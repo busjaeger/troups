@@ -1,47 +1,47 @@
 package edu.illinois.htx.tm;
 
-import edu.illinois.htx.tm.TransactionLog.Entry.Type;
+import edu.illinois.htx.tm.TransactionLog.Record.Type;
 
 public abstract class AbstractTransactionLog<K extends Key> implements
     TransactionLog<K> {
 
   @Override
-  public Entry<K> newEntry(Type type, long tid) {
-    return newEntry(type, tid, null);
+  public Record<K> newRecord(Type type, long tid) {
+    return newRecord(type, tid, null);
   }
 
-  public Entry<K> newEntry(Type type, long tid, K key) {
-    return newEntry(type, tid, key, -1);
-  }
-
-  @Override
-  public void appendBegin(long tid) {
-    append(newEntry(Type.BEGIN, tid));
+  public Record<K> newRecord(Type type, long tid, K key) {
+    return newRecord(type, tid, key, -1);
   }
 
   @Override
-  public void appendCommit(long tid) {
-    append(newEntry(Type.COMMIT, tid));
+  public long appendBegin(long tid) {
+    return append(newRecord(Type.BEGIN, tid));
   }
 
   @Override
-  public void appendAbort(long tid) {
-    append(newEntry(Type.ABORT, tid));
+  public long appendCommit(long tid) {
+    return append(newRecord(Type.COMMIT, tid));
   }
 
   @Override
-  public void appendFinalize(long tid) {
-    append(newEntry(Type.FINALIZE, tid));
+  public long appendAbort(long tid) {
+    return append(newRecord(Type.ABORT, tid));
   }
 
   @Override
-  public void appendRead(long tid, K key, long version) {
-    append(newEntry(Type.READ, tid, key, version));
+  public long appendFinalize(long tid) {
+    return append(newRecord(Type.FINALIZE, tid));
   }
 
   @Override
-  public void appendWrite(long tid, K key, boolean isDelete) {
-    append(newEntry(isDelete ? Type.DELETE : Type.WRITE, tid, key));
+  public long appendRead(long tid, K key, long version) {
+    return append(newRecord(Type.READ, tid, key, version));
+  }
+
+  @Override
+  public long appendWrite(long tid, K key, boolean isDelete) {
+    return append(newRecord(isDelete ? Type.DELETE : Type.WRITE, tid, key));
   }
 
 }

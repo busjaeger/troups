@@ -1,23 +1,41 @@
 package edu.illinois.htx.test;
 
+import java.util.NavigableMap;
+import java.util.TreeMap;
+
 import edu.illinois.htx.tm.AbstractTransactionLog;
-import edu.illinois.htx.tm.TransactionLog.Entry.Type;
+import edu.illinois.htx.tm.TransactionLog.Record.Type;
 
 public class InMemoryTransactionLog extends AbstractTransactionLog<StringKey> {
 
+  private NavigableMap<Long, Record<StringKey>> log;
+  private long seqid;
+
+  public InMemoryTransactionLog() {
+    this.log = new TreeMap<Long, Record<StringKey>>();
+    this.seqid = 0;
+  }
+
   @Override
-  public Entry<StringKey> newEntry(Type type, long tid, StringKey key,
+  public Record<StringKey> newRecord(Type type, long tid, StringKey key,
       long version) {
-    return null;
+    return new StringKeyRecord(seqid++, tid, type, key, version);
   }
 
   @Override
-  public void append(Entry<StringKey> entry) {
+  public long append(Record<StringKey> record) {
+    log.put(record.getSID(), record);
+    return record.getSID();
   }
 
   @Override
-  public Iterable<Entry<StringKey>> read() {
-    return null;
+  public Iterable<Record<StringKey>> read() {
+    return log.values();
+  }
+
+  @Override
+  public void savepoint(long sid) {
+    log = new TreeMap<Long, Record<StringKey>>(log.tailMap(sid, true));
   }
 
 }

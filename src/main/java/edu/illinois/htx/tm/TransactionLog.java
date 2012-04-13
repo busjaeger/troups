@@ -1,10 +1,10 @@
 package edu.illinois.htx.tm;
 
-import edu.illinois.htx.tm.TransactionLog.Entry.Type;
+import edu.illinois.htx.tm.TransactionLog.Record.Type;
 
 public interface TransactionLog<K extends Key> {
 
-  public interface Entry<K> {
+  public interface Record<K> {
 
     public enum Type {
       BEGIN, READ, WRITE, DELETE, COMMIT, ABORT, FINALIZE
@@ -31,26 +31,27 @@ public interface TransactionLog<K extends Key> {
     long getVersion();
   }
 
-  Entry<K> newEntry(Type type, long tid);
+  Record<K> newRecord(Type type, long tid);
 
-  Entry<K> newEntry(Type type, long tid, K key);
+  Record<K> newRecord(Type type, long tid, K key);
 
-  Entry<K> newEntry(Type type, long tid, K key, long version);
+  Record<K> newRecord(Type type, long tid, K key, long version);
 
-  void append(Entry<K> entry);
+  long append(Record<K> record);
 
-  void appendBegin(long tid);
+  long appendBegin(long tid);
 
-  void appendCommit(long tid);
+  long appendCommit(long tid);
 
-  void appendAbort(long tid);
+  long appendAbort(long tid);
 
-  void appendFinalize(long tid);
+  long appendFinalize(long tid);
 
-  void appendRead(long tid, K key, long version);
+  long appendRead(long tid, K key, long version);
 
-  void appendWrite(long tid, K key, boolean isDelete);
+  long appendWrite(long tid, K key, boolean isDelete);
 
-  Iterable<Entry<K>> read();
+  Iterable<Record<K>> read();
 
+  void savepoint(long sid);
 }

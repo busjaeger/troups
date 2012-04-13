@@ -16,6 +16,8 @@ import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
@@ -23,6 +25,7 @@ import edu.illinois.htx.tm.KeyVersion;
 import edu.illinois.htx.tm.MultiversionTransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.TransactionLog;
+import edu.illinois.htx.tm.TransactionLog.Record.Type;
 import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
 
 /**
@@ -112,6 +115,10 @@ public class MVTOTransactionManager<K extends Key> implements
   private final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> transactionsByVersionsRead;
   // TAs indexed by key currently being written for efficient conflict detection
   private final Map<K, NavigableSet<MVTOTransaction<K>>> writesInProgress;
+  // flag to indicate whether this
+  private boolean running;
+
+  private ReadWriteLock lock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
       ScheduledExecutorService executorService, TransactionLog<K> transactionLog) {
@@ -137,9 +144,32 @@ public class MVTOTransactionManager<K extends Key> implements
   }
 
   public void start() {
-    // TODO recover state from transaction log
-    this.firstActive = 0L;
-    this.executorService.scheduleAtFixedRate(this, 5, 1, TimeUnit.SECONDS);
+    lock.writeLock().lock();
+    try {
+      replay();
+      this.executorService.scheduleAtFixedRate(this, 5, 1, TimeUnit.SECONDS);
+      running = true;
+    } finally {
+      lock.writeLock().unlock();
+    }
+  }
+
+  public synchronized void stop() {
+    lock.writeLock().lock();
+    try {
+      run();
+      running = false;
+      for (MVTOTransaction<K> ta : transactions.values()) {
+        synchronized (ta) {
+          if (ta.getState()==State.BLOCKED) {
+            ta.setState(State.ACTIVE);
+            ta.notifyAll();
+          }
+        }
+      }
+    } finally {
+      lock.writeLock().unlock();
+    }
   }
 
   /**
@@ -157,63 +187,71 @@ public class MVTOTransactionManager<K extends Key> implements
   public synchronized void filterReads(long tid,
       Iterable<? extends KeyVersion<K>> versions)
       throws TransactionAbortedException {
-    MVTOTransaction<K> reader = getActiveTransaction(tid);
-    Iterator<? extends KeyVersion<K>> it = versions.iterator();
-    if (it.hasNext()) {
-      KeyVersion<K> kv = it.next();
-      outer: while (true) {
-        K key = kv.getKey();
-        long version = kv.getVersion();
+    lock.readLock().lock();
+    try {
+      checkRunning();
+      MVTOTransaction<K> reader = getActiveTransaction(tid);
+      Iterator<? extends KeyVersion<K>> it = versions.iterator();
+      if (it.hasNext()) {
+        KeyVersion<K> kv = it.next();
+        outer: while (true) {
+          K key = kv.getKey();
+          long version = kv.getVersion();
 
-        // check if we have admitted a write that hasn't been applied yet
-        MVTOTransaction<K> lastWrite = getLatestWriteInProgressBefore(key,
-            reader);
-        if (lastWrite != null && lastWrite.getID() > version) {
-          abort(reader.getID());
-          throw new TransactionAbortedException("Passed writer");
-        }
+          // check if we have admitted a write that hasn't been applied yet
+          MVTOTransaction<K> lastWrite = getLatestWriteInProgressBefore(key,
+              reader);
+          if (lastWrite != null && lastWrite.getID() > version) {
+            abort(reader.getID());
+            throw new TransactionAbortedException("Passed writer");
+          }
 
-        MVTOTransaction<K> writer = transactions.get(version);
-        // if we don't have a TA, assume TA is committed and GC'ed
-        if (writer != null) {
-          switch (writer.getState()) {
-          case ACTIVE:
-          case BLOCKED:
-            // value not yet committed, add dependency in case writer aborts
-            writer.addReadBy(reader);
-            reader.addReadFrom(writer);
-            // value deleted
-            if (writer.hasDeleted(key))
+          MVTOTransaction<K> writer = transactions.get(version);
+          // if we don't have a TA, assume TA is committed and GC'ed
+          if (writer != null) {
+            switch (writer.getState()) {
+            case ACTIVE:
+            case BLOCKED:
+              // value not yet committed, add dependency in case writer aborts
+              writer.addReadBy(reader);
+              reader.addReadFrom(writer);
+              // value deleted
+              if (writer.hasDeleted(key))
+                it.remove();
+              break;
+            case ABORTED:
+              // value written by aborted TA & not yet GC'ed, remove from
+              // results
               it.remove();
-            break;
-          case ABORTED:
-            // value written by aborted TA & not yet GC'ed, remove from results
+              continue;
+            case COMMITTED:
+              // value deleted, but not yet cleaned up
+              if (writer.hasDeleted(key))
+                it.remove();
+              break;
+            }
+          }
+
+          // remember read for conflict detection
+          transactionLog.appendRead(tid, key, version);
+          addRead(reader, key, version);
+
+          // older versions not yet cleaned up, remove from results
+          while (it.hasNext()) {
+            KeyVersion<K> next = it.next();
+            if (kv.getVersion() != next.getVersion()) {
+              kv = next;
+              continue outer;
+            }
             it.remove();
-            continue;
-          case COMMITTED:
-            // value deleted, but not yet cleaned up
-            if (writer.hasDeleted(key))
-              it.remove();
-            break;
           }
+          // no further elements
+          break;
         }
-
-        // remember read for conflict detection
-        transactionLog.appendRead(tid, key, version);
-        addRead(reader, key, version);
-
-        // older versions not yet cleaned up, remove from results
-        while (it.hasNext()) {
-          KeyVersion<K> next = it.next();
-          if (kv.getVersion() != next.getVersion()) {
-            kv = next;
-            continue outer;
-          }
-          it.remove();
-        }
-        // no further elements
-        break;
       }
+    } finally {
+      lock.readLock().unlock();
+
     }
   }
 
@@ -227,109 +265,143 @@ public class MVTOTransactionManager<K extends Key> implements
   @Override
   public synchronized void preWrite(long tid, boolean isDelete,
       Iterable<? extends K> keys) throws TransactionAbortedException {
-    MVTOTransaction<K> writer = getActiveTransaction(tid);
 
-    for (K key : keys) {
-      /*
-       * record write so we can clean it up if the TA aborts. If it is a delete,
-       * we also use this information to filter deleted versions from reads
-       * results and to delete values from the underlying data store when the
-       * transaction commits
-       */
-      transactionLog.appendWrite(tid, key, isDelete);
-      writer.addWrite(key, isDelete);
+    lock.readLock().lock();
+    try {
+      checkRunning();
+      MVTOTransaction<K> writer = getActiveTransaction(tid);
+      for (K key : keys) {
+        /*
+         * record write so we can clean it up if the TA aborts. If it is a
+         * delete, we also use this information to filter deleted versions from
+         * reads results and to delete values from the underlying data store
+         * when the transaction commits
+         */
+        transactionLog.appendWrite(tid, key, isDelete);
+        writer.addWrite(key, isDelete);
 
-      /*
-       * index transaction by key, so readers can check if this write has been
-       * applied and if not abort.
-       */
-      addWriteInProgress(writer, key);
+        /*
+         * index transaction by key, so readers can check if this write has been
+         * applied and if not abort.
+         */
+        addWriteInProgress(writer, key);
 
-      // enforce proper time-stamp ordering: abort transaction if needed
-      if (hasYoungerReaderOfOlderWriter(key, writer)) {
-        abort(writer.getID());
-        throw new TransactionAbortedException(
-            "Transaction "
-                + writer.getID()
-                + " cannot write, because a newer transaction has already read an older value.");
+        // enforce proper time-stamp ordering: abort transaction if needed
+        if (hasYoungerReaderOfOlderWriter(key, writer)) {
+          abort(writer.getID());
+          throw new TransactionAbortedException(
+              "Transaction "
+                  + writer.getID()
+                  + " cannot write, because a newer transaction has already read an older value.");
+        }
       }
+    } finally {
+      lock.readLock().unlock();
     }
   }
 
   @Override
   public synchronized void postWrite(long tid, boolean isDelete,
       Iterable<? extends K> keys) throws TransactionAbortedException {
-    MVTOTransaction<K> writer = getActiveTransaction(tid);
-    for (K key : keys)
-      removeWriteInProgress(writer, key);
+    lock.readLock().lock();
+    try {
+      checkRunning();
+      MVTOTransaction<K> writer = getActiveTransaction(tid);
+      for (K key : keys)
+        removeWriteInProgress(writer, key);
+    } finally {
+      lock.readLock().unlock();
+    }
   }
 
   public synchronized void begin(final long tid) {
-    if (transactions.get(tid) != null)
-      throw new IllegalStateException("Transaction " + tid + " already started");
-    if (!transactions.isEmpty() && transactions.lastEntry().getKey() > tid)
-      throw new IllegalArgumentException("Transaction ID " + tid
-          + " has already been used");
-    transactionLog.appendBegin(tid);
-    transactions.put(tid, new MVTOTransaction<K>(tid));
+    lock.readLock().lock();
+    try {
+      checkRunning();
+      if (transactions.get(tid) != null)
+        throw new IllegalStateException("Transaction " + tid
+            + " already started");
+      if (!transactions.isEmpty() && transactions.lastEntry().getKey() > tid)
+        throw new IllegalArgumentException("Transaction ID " + tid
+            + " has already been used");
+      transactionLog.appendBegin(tid);
+      transactions.put(tid, new MVTOTransaction<K>(tid));
+    } finally {
+      lock.readLock().lock();
+    }
   }
 
   @Override
   public synchronized void commit(final long tid)
       throws TransactionAbortedException {
-    // only continue if transaction is active
-    final MVTOTransaction<K> ta = getTransaction(tid);
-    switch (ta.getState()) {
-    case ACTIVE:
-      break;
-    case BLOCKED:
-      throw new IllegalStateException("Transaction " + tid + " commit pending");
-    case ABORTED:
-      throw new TransactionAbortedException("Transaction " + tid
-          + " already aborted");
-    case COMMITTED:
-      return;
-    }
+    lock.readLock().lock();
+    try {
+      checkRunning();
+      // only continue if transaction is active
+      final MVTOTransaction<K> ta = getTransaction(tid);
+      switch (ta.getState()) {
+      case ACTIVE:
+        break;
+      case BLOCKED:
+        throw new IllegalStateException("Transaction " + tid
+            + " commit pending");
+      case ABORTED:
+        throw new TransactionAbortedException("Transaction " + tid
+            + " already aborted");
+      case COMMITTED:
+        return;
+      }
 
-    synchronized (ta) {
-      while (!ta.getReadFrom().isEmpty()) {
-        ta.setState(BLOCKED);
-        try {
-          // TODO add timeout
-          ta.wait();
-        } catch (InterruptedException e) {
-          Thread.interrupted();
+      synchronized (ta) {
+        while (!ta.getReadFrom().isEmpty()) {
+          ta.setState(BLOCKED);
+          try {
+            // TODO add timeout
+            ta.wait();
+          } catch (InterruptedException e) {
+            Thread.interrupted();
+          }
+          // victim of cascading abort
+          if (ta.getState() == State.ABORTED)
+            throw new TransactionAbortedException("Transaction " + tid
+                + " is victim of cascading abort");
+          if (!running)
+            throw new IllegalStateException("Transaction Manager stopped");
         }
-        // victim of cascading abort
-        if (ta.getState() == State.ABORTED)
-          throw new TransactionAbortedException("Transaction " + tid
-              + " is victim of cascading abort");
       }
+
+      transactionLog.appendCommit(tid);
+      ta.setState(COMMITTED);
+      System.out.println("Committed " + tid);
+
+      /*
+       * After a transaction commits, we still need to notify any waiting
+       * readers and permanently remove deleted cells. We can do this on a
+       * separate thread, since it is decoupled from the commit operation.
+       */
+      // Do it synchronously for now, so we still hold the region lock.
+      // Otherwise,
+      // the region may be closed by the time we try to finalize. That's not
+      // necessarily a problem, since we could clean up when region comes back
+      // online. But for now we assume 'no crash' case, no recovery yet.
+
+      // executorService.execute(new Runnable() {
+      // @Override
+      // public void run() {
+      finalizeCommit(tid);
+      // }
+      // });
+    } finally {
+      lock.readLock().unlock();
     }
-
-    transactionLog.appendCommit(tid);
-    ta.setState(COMMITTED);
-    System.out.println("Committed " + tid);
-
-    /*
-     * After a transaction commits, we still need to notify any waiting readers
-     * and permanently remove deleted cells. We can do this on a separate
-     * thread, since it is decoupled from the commit operation.
-     */
-    executorService.execute(new Runnable() {
-      @Override
-      public void run() {
-        finalizeCommit(tid);
-      }
-    });
   }
 
   synchronized void finalizeCommit(long tid) {
     MVTOTransaction<K> ta = getTransaction(tid);
     /*
-     * notify transactions that read from this one, that it committed (so
-     * theydon't wait on it): this has to be done after commit, since we don't
-     * want to notify and then fail before commit.
+     * notify transactions that read from this one, that it committed (so they
+     * don't wait on it): this has to be done after commit, since we don't want
+     * to notify and then fail before commit.
      */
     for (Iterator<MVTOTransaction<K>> it = ta.getReadBy().iterator(); it
         .hasNext();) {
@@ -368,40 +440,45 @@ public class MVTOTransactionManager<K extends Key> implements
 
   @Override
   public synchronized void abort(final long tid) {
-    final MVTOTransaction<K> ta = getTransaction(tid);
-    boolean wasBlocked = false;
-    switch (ta.getState()) {
-    case ACTIVE:
-      break;
-    case BLOCKED:
-      wasBlocked = true;
-      break;
-    case ABORTED:
-      return;
-    case COMMITTED:
-      throw new IllegalStateException("Transaction " + tid
-          + " already committed");
-    }
-
-    transactionLog.appendAbort(tid);
-    ta.setState(ABORTED);
-    if (wasBlocked)
-      synchronized (ta) {
-        ta.notify();
+    lock.readLock().lock();
+    try {
+      checkRunning();
+      final MVTOTransaction<K> ta = getTransaction(tid);
+      boolean wasBlocked = false;
+      switch (ta.getState()) {
+      case ACTIVE:
+        break;
+      case BLOCKED:
+        wasBlocked = true;
+        break;
+      case ABORTED:
+        return;
+      case COMMITTED:
+        throw new IllegalStateException("Transaction " + tid
+            + " already committed");
       }
 
-    // This TA should no longer cause write conflicts, since it's aborted
-    removeReads(ta);
-
-    // abort any transactions that read from this one and undo writes
-    executorService.execute(new Runnable() {
-      @Override
-      public void run() {
-        synchronized (MVTOTransactionManager.this) {
-          finalizeAbort(tid);
+      transactionLog.appendAbort(tid);
+      ta.setState(ABORTED);
+      if (wasBlocked)
+        synchronized (ta) {
+          ta.notify();
         }
-      }
-    });
+
+      // This TA should no longer cause write conflicts, since it's aborted
+      removeReads(ta);
+
+      // abort any transactions that read from this one and undo writes
+
+      // executorService.execute(new Runnable() {
+      // @Override
+      // public void run() {
+      finalizeAbort(tid);
+      // }
+      // });
+    } finally {
+      lock.readLock().unlock();
+    }
   }
 
   private synchronized void finalizeAbort(long tid) {
@@ -439,6 +516,12 @@ public class MVTOTransactionManager<K extends Key> implements
     ta.setFinalized();
   }
 
+  // must be called holding the lock
+  private void checkRunning() {
+    if (!running)
+      throw new IllegalStateException("Transaction Manager stopped");
+  }
+  
   /**
    * Get the transaction object for the given timestamp
    * 
@@ -593,4 +676,81 @@ public class MVTOTransactionManager<K extends Key> implements
     }
   }
 
+  /**
+   * for now assumes proper region shutdown
+   */
+  private void replay() {
+    boolean first = true;
+    firstActive = 0;
+    for (TransactionLog.Record<K> record : transactionLog.read()) {
+      long tid = record.getTID();
+      // ignore transactions that began before the log save-point
+      MVTOTransaction<K> ta = transactions.get(tid);
+      if (ta == null && record.getType() != Type.BEGIN)
+        continue;
+
+      switch (record.getType()) {
+      case BEGIN: {
+        if (first) {
+          firstActive = tid;
+          first = false;
+        }
+        transactions.put(tid, new MVTOTransaction<K>(tid));
+        break;
+      }
+      case READ: {
+        K key = record.getKey();
+        long version = record.getVersion();
+        MVTOTransaction<K> writer = transactions.get(version);
+        if (writer != null) {
+          switch (writer.getState()) {
+          case ACTIVE:
+          case BLOCKED:
+            // value not yet committed, add dependency in case writer aborts
+            writer.addReadBy(ta);
+            ta.addReadFrom(writer);
+            break;
+          case ABORTED:
+            // TODO this violates invariants
+            break;
+          case COMMITTED:
+            break;
+          }
+        }
+        // remember read for conflict detection
+        addRead(ta, key, version);
+        break;
+      }
+      case WRITE:
+      case DELETE: {
+        ta.addWrite(record.getKey(), record.getType() == Type.DELETE);
+        break;
+      }
+      case ABORT: {
+        removeReads(ta);
+        ta.setState(ABORTED);
+        break;
+      }
+      case COMMIT: {
+        ta.setState(COMMITTED);
+        break;
+      }
+      case FINALIZE: {
+        switch (ta.getState()) {
+        case ABORTED:
+        case COMMITTED:
+          Iterator<MVTOTransaction<K>> it = ta.getReadBy().iterator();
+          while (it.hasNext()) {
+            MVTOTransaction<K> readBy = it.next();
+            readBy.removeReadFrom(ta);
+            it.remove();
+          }
+          break;
+        default:
+          // this shouldn't happen
+        }
+      }
+      }
+    }
+  }
 }
