@@ -17,7 +17,7 @@ import java.util.NavigableSet;
 import java.util.Set;
 
 import edu.illinois.htx.tm.Key;
-import edu.illinois.htx.tm.KeyVersion;
+import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
@@ -234,7 +234,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   // TODO lock/unlock should be in finally blocks
-  synchronized void afterRead(Iterable<? extends KeyVersion<K>> versions)
+  synchronized void afterRead(Iterable<? extends KeyVersions<K>> kvs)
       throws TransactionAbortedException {
     // check state
     switch (state) {
@@ -246,78 +246,70 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       throw new IllegalStateException("Transaction in state " + state);
     }
 
-    Iterator<? extends KeyVersion<K>> it = versions.iterator();
-    if (it.hasNext()) {
-      KeyVersion<K> kv = it.next();
-      tm.lock(kv.getKey());
-      outer: while (true) {
-        K key = kv.getKey();
-        long version = kv.getVersion();
-
-        MVTOTransaction<K> writer = tm.getTransaction(version);
-        // if we don't have a TA, assume TA is committed and GC'ed
-        if (writer != null) {
-          synchronized (writer) {
-            switch (writer.state) {
-            case ACTIVE:
-            case BLOCKED:
-              // value not yet committed, add dependency in case writer aborts
-              writer.readBy.add(this);
-              this.readFrom.add(writer);
-              // value deleted
-              if (writer.hasDeleted(key))
+    for (KeyVersions<K> kv : kvs) {
+      K key = kv.getKey();
+      tm.lock(key);
+      try {
+        for (Iterator<Long> it = kv.getVersions().iterator(); it.hasNext();) {
+          long version = it.next();
+          MVTOTransaction<K> writer = tm.getTransaction(version);
+          // if we don't have a TA, assume TA is committed and GC'ed
+          if (writer != null) {
+            synchronized (writer) {
+              switch (writer.state) {
+              case ACTIVE:
+              case BLOCKED:
+                // value not yet committed, add dependency in case writer aborts
+                writer.readBy.add(this);
+                this.readFrom.add(writer);
+                // value deleted
+                if (writer.hasDeleted(key))
+                  it.remove();
+                break;
+              case ABORTED:
+                // value written by aborted TA not yet GC'ed, remove from
+                // results
                 it.remove();
-              break;
-            case ABORTED:
-              // value written by aborted TA not yet GC'ed, remove from results
-              it.remove();
-              continue;
-            case COMMITTED:
-              // value deleted, but not yet cleaned up
-              if (writer.hasDeleted(key))
-                it.remove();
-              break;
+                continue;
+              case COMMITTED:
+                // value deleted, but not yet cleaned up
+                if (writer.hasDeleted(key))
+                  it.remove();
+                break;
+              }
             }
           }
-        }
 
-        /*
-         * Check if we have admitted a writer that started before this
-         * transaction but whose version is not in the result set. If that's the
-         * case, we cannot let this reader proceed, because reading an older
-         * version would violate the serialization order (if this transaction
-         * had already read the older value, the writer would have never been
-         * admitted)
-         */
-        NavigableSet<MVTOTransaction<K>> writes = tm.getWriters(key);
-        if (writes != null) {
-          MVTOTransaction<K> lastWrite = writes.lower(this);
-          if (lastWrite != null && lastWrite.getID() > version) {
-            tm.unlock(key);
-            abort();
-            throw new TransactionAbortedException("Read conflict");
+          /*
+           * Check if we have admitted a writer that started before this
+           * transaction but whose version is not in the result set. If that's
+           * the case, we cannot let this reader proceed, because reading an
+           * older version would violate the serialization order (if this
+           * transaction had already read the older value, the writer would have
+           * never been admitted)
+           */
+          NavigableSet<MVTOTransaction<K>> writes = tm.getWriters(key);
+          if (writes != null) {
+            MVTOTransaction<K> lastWrite = writes.lower(this);
+            if (lastWrite != null && lastWrite.getID() > version) {
+              abort();
+              throw new TransactionAbortedException("Read conflict");
+            }
+          }
+
+          // remember read for conflict detection
+          tm.getLog().appendRead(id, key, version);
+          addRead(key, version);
+          tm.addReader(key, version, this);
+
+          // remove all older versions from result set
+          while (it.hasNext()) {
+            it.next();
+            it.remove();
           }
         }
-
-        // remember read for conflict detection
-        tm.getLog().appendRead(id, key, version);
-        addRead(key, version);
-        tm.addReader(key, version, this);
-
-        // older versions not yet cleaned up, remove from results
-        while (it.hasNext()) {
-          KeyVersion<K> next = it.next();
-          if (kv.getVersion() != next.getVersion()) {
-            tm.unlock(key);
-            kv = next;
-            tm.lock(kv.getKey());
-            continue outer;
-          }
-          it.remove();
-        }
+      } finally {
         tm.unlock(key);
-        // no further elements
-        break;
       }
     }
   }

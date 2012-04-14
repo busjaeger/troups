@@ -6,9 +6,6 @@ import java.io.IOException;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import com.google.common.base.Function;
-import com.google.common.collect.Iterables;
-
 import edu.illinois.htx.tm.KeyValueStore;
 
 /**
@@ -29,17 +26,11 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
     versions.put(version, new Object());
   }
 
-  public Iterable<StringKeyVersion> readVersions(final StringKey key) {
+  public Iterable<Long> readVersions(final StringKey key) {
     NavigableMap<Long, Object> versions = values.get(key);
     if (versions == null)
       return emptyList();
-    return Iterables.transform(versions.keySet(),
-        new Function<Long, StringKeyVersion>() {
-          @Override
-          public StringKeyVersion apply(Long version) {
-            return new StringKeyVersion(key, version);
-          }
-        });
+    return versions.keySet();
   }
 
   @Override

@@ -25,7 +25,7 @@ import org.jboss.netty.util.internal.ConcurrentHashMap;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
-import edu.illinois.htx.tm.KeyVersion;
+import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.MultiversionTransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.TransactionLog;
@@ -193,13 +193,12 @@ public class MVTOTransactionManager<K extends Key> implements
    * @throws TransactionAbortedException
    */
   @Override
-  public void filterReads(final long tid,
-      final Iterable<? extends KeyVersion<K>> versions)
+  public void filterReads(final long tid, final Iterable<? extends KeyVersions<K>> kvs)
       throws TransactionAbortedException {
     new WithReadLock<TransactionAbortedException>() {
       @Override
       void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
-        ta.afterRead(versions);
+        ta.afterRead(kvs);
       }
     }.run(tid);
   }

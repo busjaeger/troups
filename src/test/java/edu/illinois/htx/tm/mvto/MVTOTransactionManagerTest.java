@@ -1,6 +1,7 @@
 package edu.illinois.htx.tm.mvto;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -13,11 +14,11 @@ import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import edu.illinois.htx.test.StringKeyTransactionLog;
 import edu.illinois.htx.test.SequentialExecutorService;
 import edu.illinois.htx.test.StringKey;
+import edu.illinois.htx.test.StringKeyTransactionLog;
 import edu.illinois.htx.test.StringKeyValueStore;
-import edu.illinois.htx.test.StringKeyVersion;
+import edu.illinois.htx.test.StringKeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 public class MVTOTransactionManagerTest {
@@ -52,9 +53,9 @@ public class MVTOTransactionManagerTest {
     tm.begin(2);
 
     // both transactions read the initial version
-    Iterable<StringKeyVersion> versions = kvs.readVersions(key);
-    tm.filterReads(1, versions);
-    tm.filterReads(2, versions);
+    Iterable<Long> versions = kvs.readVersions(key);
+    tm.filterReads(1, singleton(key, versions));
+    tm.filterReads(2, singleton(key, versions));
 
     kvs.writeVersion(key, 1);
     try {
@@ -76,11 +77,11 @@ public class MVTOTransactionManagerTest {
 
     // at this point we expect only version 2 of x to be present
     versions = kvs.readVersions(key);
-    Iterator<StringKeyVersion> it = versions.iterator();
+    Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 0), it.next());
+    Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 2), it.next());
+    Assert.assertEquals(Long.valueOf(2), it.next());
     Assert.assertFalse(it.hasNext());
   }
 
@@ -95,8 +96,8 @@ public class MVTOTransactionManagerTest {
     tm.begin(1);
     tm.begin(2);
 
-    Iterable<StringKeyVersion> versions = kvs.readVersions(key);
-    tm.filterReads(1, versions);
+    Iterable<Long> versions = kvs.readVersions(key);
+    tm.filterReads(1, singleton(key, versions));
     tm.preWrite(1, false, keys);
 
     /*
@@ -106,7 +107,7 @@ public class MVTOTransactionManagerTest {
      * the schedule is no longer serializable.
      */
     try {
-      tm.filterReads(2, versions);
+      tm.filterReads(2, singleton(key, versions));
       Assert.fail("read should not be permitted");
     } catch (TransactionAbortedException e) {
       // expected
@@ -117,11 +118,11 @@ public class MVTOTransactionManagerTest {
 
     // at this point we expect only version 2 of x to be present
     versions = kvs.readVersions(key);
-    Iterator<StringKeyVersion> it = versions.iterator();
+    Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 0), it.next());
+    Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 1), it.next());
+    Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());
   }
 
@@ -140,12 +141,12 @@ public class MVTOTransactionManagerTest {
     tm.begin(1);
     tm.begin(2);
 
-    tm.filterReads(1, kvs.readVersions(key));
+    tm.filterReads(1, singleton(key, kvs.readVersions(key)));
     tm.preWrite(1, false, keys);
     kvs.writeVersion(key, 1);
     tm.postWrite(1, false, keys);
 
-    tm.filterReads(2, kvs.readVersions(key));
+    tm.filterReads(2, singleton(key, kvs.readVersions(key)));
     tm.preWrite(2, false, keys);
     kvs.writeVersion(key, 2);
     tm.postWrite(2, false, keys);
@@ -181,14 +182,19 @@ public class MVTOTransactionManagerTest {
     }
 
     // at this point we expect only version 2 of x to be present
-    Iterable<StringKeyVersion> versions = kvs.readVersions(key);
-    Iterator<StringKeyVersion> it = versions.iterator();
+    Iterable<Long> versions = kvs.readVersions(key);
+    Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 0), it.next());
+    Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 1), it.next());
+    Assert.assertEquals(Long.valueOf(1), it.next());
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(new StringKeyVersion(key, 2), it.next());
+    Assert.assertEquals(Long.valueOf(2), it.next());
     Assert.assertFalse(it.hasNext());
+  }
+
+  private static Iterable<StringKeyVersions> singleton(
+      StringKey key, Iterable<Long> versions) {
+    return Collections.singletonList(new StringKeyVersions(key, versions));
   }
 }
