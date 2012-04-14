@@ -3,6 +3,7 @@ package edu.illinois.htx.tm.mvto;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.ABORTED;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.COMMITTED;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -27,9 +28,10 @@ import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.MultiversionTransactionManager;
+import edu.illinois.htx.tm.LogRecord;
+import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tm.TransactionLog;
-import edu.illinois.htx.tm.TransactionLog.Record.Type;
+import edu.illinois.htx.tm.Log;
 
 /**
  * Note: this class (and all other classes in this package) do not depend on
@@ -91,8 +93,8 @@ import edu.illinois.htx.tm.TransactionLog.Record.Type;
  * 
  * </ol>
  */
-public class MVTOTransactionManager<K extends Key> implements
-    MultiversionTransactionManager<K>, Runnable {
+public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
+    implements MultiversionTransactionManager<K>, Runnable {
 
   // immutable state
   // executor for async operations
@@ -100,7 +102,7 @@ public class MVTOTransactionManager<K extends Key> implements
   // key value store this TM is governing
   private final KeyValueStore<K> keyValueStore;
   // transaction log
-  private final TransactionLog<K> transactionLog;
+  private final Log<K, R> transactionLog;
 
   // mutable state
   // transactions by transaction ID for efficient direct lookup
@@ -119,7 +121,7 @@ public class MVTOTransactionManager<K extends Key> implements
   private ReadWriteLock runLock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
-      ScheduledExecutorService executorService, TransactionLog<K> transactionLog) {
+      ScheduledExecutorService executorService, Log<K, R> transactionLog) {
     this.keyValueStore = keyValueStore;
     this.executorService = executorService;
     this.transactionLog = transactionLog;
@@ -136,7 +138,7 @@ public class MVTOTransactionManager<K extends Key> implements
     return keyValueStore;
   }
 
-  public TransactionLog<K> getLog() {
+  public Log<K, R> getLog() {
     return transactionLog;
   }
 
@@ -154,12 +156,12 @@ public class MVTOTransactionManager<K extends Key> implements
     }
   }
 
-  public void start() {
+  public void start() throws IOException {
     runLock.writeLock().lock();
     try {
       if (running)
         return;
-      replay();
+      startLog();
       this.executorService.scheduleAtFixedRate(this, 5, 1, TimeUnit.SECONDS);
       running = true;
     } finally {
@@ -193,11 +195,11 @@ public class MVTOTransactionManager<K extends Key> implements
    * @throws TransactionAbortedException
    */
   @Override
-  public void filterReads(final long tid, final Iterable<? extends KeyVersions<K>> kvs)
-      throws TransactionAbortedException {
-    new WithReadLock<TransactionAbortedException>() {
+  public void filterReads(final long tid,
+      final Iterable<? extends KeyVersions<K>> kvs) throws IOException {
+    new WithReadLock() {
       @Override
-      void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
+      void execute(MVTOTransaction<K> ta) throws IOException {
         ta.afterRead(kvs);
       }
     }.run(tid);
@@ -205,10 +207,10 @@ public class MVTOTransactionManager<K extends Key> implements
 
   @Override
   public synchronized void preWrite(final long tid, final boolean isDelete,
-      final Iterable<? extends K> keys) throws TransactionAbortedException {
-    new WithReadLock<TransactionAbortedException>() {
+      final Iterable<? extends K> keys) throws IOException {
+    new WithReadLock() {
       @Override
-      void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
+      void execute(MVTOTransaction<K> ta) throws IOException {
         ta.beforeWrite(isDelete, keys);
       }
     }.run(tid);
@@ -216,27 +218,27 @@ public class MVTOTransactionManager<K extends Key> implements
 
   @Override
   public synchronized void postWrite(final long tid, final boolean isDelete,
-      final Iterable<? extends K> keys) throws TransactionAbortedException {
-    new WithReadLock<TransactionAbortedException>() {
+      final Iterable<? extends K> keys) throws IOException {
+    new WithReadLock() {
       @Override
-      void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
+      void execute(MVTOTransaction<K> ta) throws IOException {
         ta.afterWrite(isDelete, keys);
       }
     }.run(tid);
   }
 
-  public synchronized void begin(final long tid) {
-    new WithReadLock<RuntimeException>() {
-      void execute(long tid) {
+  public synchronized void begin(final long tid) throws IOException {
+    new WithReadLock() {
+      void execute(long tid) throws IOException {
         addTransaction(tid);
       };
     }.run(tid);
   }
 
   @Override
-  public void commit(final long tid) throws TransactionAbortedException {
-    new WithReadLock<TransactionAbortedException>() {
-      void execute(MVTOTransaction<K> ta) throws TransactionAbortedException {
+  public void commit(final long tid) throws IOException {
+    new WithReadLock() {
+      void execute(MVTOTransaction<K> ta) throws IOException {
         ta.commit();
         System.out.println("Committed " + tid);
       }
@@ -244,17 +246,17 @@ public class MVTOTransactionManager<K extends Key> implements
   }
 
   @Override
-  public void abort(final long tid) {
-    new WithReadLock<RuntimeException>() {
-      void execute(MVTOTransaction<K> ta) {
+  public void abort(final long tid) throws IOException {
+    new WithReadLock() {
+      void execute(MVTOTransaction<K> ta) throws IOException {
         ta.abort();
         System.out.println("Aborted " + tid);
       }
     }.run(tid);
   }
 
-  abstract class WithReadLock<E extends Exception> {
-    void run(long tid) throws E {
+  abstract class WithReadLock {
+    void run(long tid) throws IOException {
       runLock.readLock().lock();
       try {
         if (!isRunning())
@@ -265,7 +267,7 @@ public class MVTOTransactionManager<K extends Key> implements
       }
     }
 
-    void execute(long tid) throws E {
+    void execute(long tid) throws IOException {
       MVTOTransaction<K> ta = getTransaction(tid);
       if (ta == null)
         throw new IllegalStateException("Transaction " + tid
@@ -273,7 +275,7 @@ public class MVTOTransactionManager<K extends Key> implements
       execute(ta);
     }
 
-    void execute(MVTOTransaction<K> ta) throws E {
+    void execute(MVTOTransaction<K> ta) throws IOException {
       // overwrite
     }
   }
@@ -311,7 +313,7 @@ public class MVTOTransactionManager<K extends Key> implements
     }
   }
 
-  void addTransaction(long tid) {
+  void addTransaction(long tid) throws IOException {
     synchronized (transactions) {
       if (transactions.get(tid) != null)
         throw new IllegalStateException("Transaction " + tid
@@ -452,11 +454,13 @@ public class MVTOTransactionManager<K extends Key> implements
 
   /**
    * for now assumes proper region shutdown
+   * 
+   * @throws IOException
    */
-  private void replay() {
+  private void startLog() throws IOException {
     boolean first = true;
     firstActive = 0;
-    for (TransactionLog.Record<K> record : transactionLog.read()) {
+    for (LogRecord<K> record : transactionLog.start()) {
       long tid = record.getTID();
       // ignore transactions that began before the log save-point
       MVTOTransaction<K> ta = transactions.get(tid);

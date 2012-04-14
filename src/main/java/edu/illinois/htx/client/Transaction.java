@@ -1,5 +1,7 @@
 package edu.illinois.htx.client;
 
+import java.io.IOException;
+
 import org.apache.hadoop.hbase.client.HTable;
 
 import edu.illinois.htx.regionserver.HRegionTransactionManagerProtocol;
@@ -43,7 +45,11 @@ public class Transaction {
     if (hTable != null) {
       HRegionTransactionManagerProtocol tm = hTable.coprocessorProxy(
           HRegionTransactionManagerProtocol.class, row);
-      tm.abort(id);
+      try {
+        tm.abort(id);
+      } catch (IOException e) {
+        throw new RuntimeException("Failed to rollback", e);
+      }
     }
   }
 
@@ -51,7 +57,11 @@ public class Transaction {
     if (hTable != null) {
       HRegionTransactionManagerProtocol tm = hTable.coprocessorProxy(
           HRegionTransactionManagerProtocol.class, row);
-      tm.commit(id);
+      try {
+        tm.commit(id);
+      } catch (IOException e) {
+        throw new RuntimeException("Failed to commit", e);
+      }
     }
   }
 

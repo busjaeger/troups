@@ -1,5 +1,7 @@
 package edu.illinois.htx.tm;
 
+import java.io.IOException;
+
 public interface TransactionManager {
 
   public static final long VERSION = 1L;
@@ -13,10 +15,10 @@ public interface TransactionManager {
    * @throws IllegalArgumentException
    *           if the given transaction ID is invalid
    */
-  void begin(long tid);
+  void begin(long tid) throws IOException;
 
-  void commit(long tid) throws TransactionAbortedException;
+  void commit(long tid) throws TransactionAbortedException, IOException;
 
-  void abort(long tid);
+  void abort(long tid) throws IOException;
 
 }

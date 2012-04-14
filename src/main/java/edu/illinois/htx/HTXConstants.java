@@ -23,4 +23,13 @@ public interface HTXConstants {
   public static final String TM_THREAD_COUNT = "htx.tm.thread.count";
 
   public static final int DEFAULT_TM_THREAD_COUNT = 10;
+
+  public static final String TM_LOG_TABLE_NAME = "htx.tm.log.table.name";
+
+  public static final String DEFAULT_TM_LOG_TABLE_NAME = "htx";
+
+  public static final String TM_LOG_TABLE_FAMILY_NAME = "htx.tm.log.table.family.name";
+
+  public static final String DEFAULT_TM_LOG_TABLE_FAMILY_NAME = "log";
+
 }

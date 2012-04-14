@@ -1,5 +1,6 @@
 package edu.illinois.htx.tm.mvto;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -16,24 +17,26 @@ import org.junit.Test;
 
 import edu.illinois.htx.test.SequentialExecutorService;
 import edu.illinois.htx.test.StringKey;
-import edu.illinois.htx.test.StringKeyTransactionLog;
+import edu.illinois.htx.test.StringKeyLog;
+import edu.illinois.htx.test.StringKeyLogRecord;
 import edu.illinois.htx.test.StringKeyValueStore;
 import edu.illinois.htx.test.StringKeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 public class MVTOTransactionManagerTest {
 
-  private MVTOTransactionManager<StringKey> tm;
+  private MVTOTransactionManager<StringKey, StringKeyLogRecord> tm;
   private StringKeyValueStore kvs;
   private SequentialExecutorService ses;
-  private StringKeyTransactionLog log;
+  private StringKeyLog log;
 
   @Before
-  public void before() {
+  public void before() throws IOException {
     kvs = new StringKeyValueStore();
     ses = new SequentialExecutorService();
-    log = new StringKeyTransactionLog();
-    tm = new MVTOTransactionManager<StringKey>(kvs, ses, log);
+    log = new StringKeyLog();
+    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, ses,
+        log);
     tm.start();
   }
 
@@ -42,7 +45,7 @@ public class MVTOTransactionManagerTest {
    * 
    */
   @Test
-  public void testWriteConflict() throws TransactionAbortedException {
+  public void testWriteConflict() throws IOException {
     // state in the data store
     StringKey key = new StringKey("x");
     Iterable<StringKey> keys = Arrays.asList(key);
@@ -86,7 +89,7 @@ public class MVTOTransactionManagerTest {
   }
 
   @Test
-  public void testReadConflict() throws TransactionAbortedException {
+  public void testReadConflict() throws IOException {
     // state in the data store
     StringKey key = new StringKey("x");
     long version = 0;
@@ -130,8 +133,8 @@ public class MVTOTransactionManagerTest {
    * tests that a blocked transaction can be committed after TM restart
    */
   @Test
-  public void testRestart() throws TransactionAbortedException,
-      InterruptedException, ExecutionException {
+  public void testRestart() throws IOException, InterruptedException,
+      ExecutionException {
     // state in the data store
     StringKey key = new StringKey("x");
     long version = 0;
@@ -171,7 +174,8 @@ public class MVTOTransactionManagerTest {
       Assert.assertTrue(e.getCause() instanceof IllegalStateException);
     }
 
-    tm = new MVTOTransactionManager<StringKey>(kvs, ses, log);
+    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, ses,
+        log);
     tm.start();
     f = es.submit(commit2);
     tm.commit(1);
@@ -193,8 +197,8 @@ public class MVTOTransactionManagerTest {
     Assert.assertFalse(it.hasNext());
   }
 
-  private static Iterable<StringKeyVersions> singleton(
-      StringKey key, Iterable<Long> versions) {
+  private static Iterable<StringKeyVersions> singleton(StringKey key,
+      Iterable<Long> versions) {
     return Collections.singletonList(new StringKeyVersions(key, versions));
   }
 }

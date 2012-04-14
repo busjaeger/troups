@@ -33,9 +33,9 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   private final Map<K, Boolean> writes;
   private final Set<MVTOTransaction<K>> readFrom;
   private final Set<MVTOTransaction<K>> readBy;
-  private final MVTOTransactionManager<K> tm;
+  private final MVTOTransactionManager<K, ?> tm;
 
-  public MVTOTransaction(long id, MVTOTransactionManager<K> tm) {
+  public MVTOTransaction(long id, MVTOTransactionManager<K, ?> tm) {
     this.id = id;
     this.state = ACTIVE;
     this.reads = new HashMap<K, Long>();
@@ -49,12 +49,12 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return this.id;
   }
 
-  public void begin() {
+  public void begin() throws IOException {
     tm.getLog().appendBegin(id);
     state = ACTIVE;
   }
 
-  synchronized void commit() throws TransactionAbortedException {
+  synchronized void commit() throws TransactionAbortedException, IOException {
     // check state
     switch (state) {
     case ACTIVE:
@@ -113,7 +113,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  synchronized void abort() {
+  synchronized void abort() throws IOException {
     switch (state) {
     case ACTIVE:
     case BLOCKED:
@@ -138,7 +138,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   // call with lock held
-  private void cleanupAfterCommit() {
+  private void cleanupAfterCommit() throws IOException {
     /*
      * notify transactions that read from this one, that it committed (so they
      * don't wait on it): this has to be done after commit, since we don't want
@@ -172,7 +172,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     finalized = true;
   }
 
-  private void cleanupAfterAbort() {
+  private void cleanupAfterAbort() throws IOException {
     // we can forget who we read from: will never commit and therefore
     // never need to wait on the TAs we read from to complete
     readFrom.clear();
@@ -235,7 +235,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   // TODO lock/unlock should be in finally blocks
   synchronized void afterRead(Iterable<? extends KeyVersions<K>> kvs)
-      throws TransactionAbortedException {
+      throws IOException {
     // check state
     switch (state) {
     case ACTIVE:
@@ -315,7 +315,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   synchronized void beforeWrite(boolean isDelete, Iterable<? extends K> keys)
-      throws TransactionAbortedException {
+      throws IOException {
     switch (state) {
     case ACTIVE:
       break;

@@ -1,8 +1,8 @@
 package edu.illinois.htx.test;
 
-import edu.illinois.htx.tm.TransactionLog.Record;
+import edu.illinois.htx.tm.LogRecord;
 
-public class StringKeyRecord implements Record<StringKey> {
+public class StringKeyLogRecord implements LogRecord<StringKey> {
 
   private final long sid;
   private final long tid;
@@ -10,7 +10,7 @@ public class StringKeyRecord implements Record<StringKey> {
   private final StringKey key;
   private final long version;
 
-  public StringKeyRecord(long sid, long tid, Type type, StringKey key,
+  public StringKeyLogRecord(long sid, long tid, Type type, StringKey key,
       long version) {
     this.sid = sid;
     this.tid = tid;

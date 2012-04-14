@@ -10,8 +10,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
+import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
@@ -49,22 +51,31 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
 
-  private MVTOTransactionManager<HKey> tm;
+  private MVTOTransactionManager<HKey, HLogRecord> tm;
 
   @Override
   public void start(CoprocessorEnvironment e) throws IOException {
-    HRegion region = ((RegionCoprocessorEnvironment) e).getRegion();
+    RegionCoprocessorEnvironment env = ((RegionCoprocessorEnvironment) e);
+    HRegion region = env.getRegion();
+    HRegionInfo regionInfo = region.getRegionInfo();
+    HConnection connection = env.getRegionServerServices().getCatalogTracker()
+        .getConnection();
     HRegionKeyValueStore kvs = new HRegionKeyValueStore(region);
-    int count = e.getConfiguration().getInt(HTXConstants.TM_THREAD_COUNT,
+    int count = env.getConfiguration().getInt(HTXConstants.TM_THREAD_COUNT,
         HTXConstants.DEFAULT_TSO_HANDLER_COUNT);
-    ScheduledExecutorService ex = Executors.newScheduledThreadPool(count);
-    HRegionTransactionLog tlog = new HRegionTransactionLog();
-    tm = new MVTOTransactionManager<HKey>(kvs, ex, tlog);
+    ScheduledExecutorService pool = Executors.newScheduledThreadPool(count);
+    HRegionLog tlog = HRegionLog.newInstance(connection, pool, regionInfo);
+    tm = new MVTOTransactionManager<HKey, HLogRecord>(kvs, pool, tlog);
   }
 
   @Override
   public void preOpen(ObserverContext<RegionCoprocessorEnvironment> e) {
-    tm.start();
+    try {
+      tm.start();
+    } catch (IOException e1) {
+      // either aborts region server or removes co-processor
+      throw new IllegalStateException(e1);
+    }
   }
 
   @Override
@@ -141,17 +152,17 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void begin(long tid) {
+  public void begin(long tid) throws IOException {
     tm.begin(tid);
   }
 
   @Override
-  public void commit(long tid) throws TransactionAbortedException {
+  public void commit(long tid) throws TransactionAbortedException, IOException {
     tm.commit(tid);
   }
 
   @Override
-  public void abort(long tid) {
+  public void abort(long tid) throws IOException {
     tm.abort(tid);
   }
 
@@ -226,6 +237,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                   public Iterator<Long> iterator() {
                     return new Iterator<Long>() {
                       boolean isFirst = true;
+
                       @Override
                       public boolean hasNext() {
                         if (isFirst)
@@ -245,8 +257,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                         if (isFirst) {
                           ts = first.getTimestamp();
                           isFirst = false;
-                        }
-                        else {
+                        } else {
                           if (next == null) {
                             next = it.next();
                             if (COMP.compare(next, first) != 0)
