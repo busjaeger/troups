@@ -16,6 +16,4 @@ public interface MultiversionTransactionManager<K extends Key> extends
   void postWrite(long tid, boolean isDelete, Iterable<? extends K> key)
       throws TransactionAbortedException, IOException;
 
-  long getFirstActiveTID();
-
 }

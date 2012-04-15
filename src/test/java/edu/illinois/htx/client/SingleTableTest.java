@@ -1,5 +1,6 @@
 package edu.illinois.htx.client;
 
+import static edu.illinois.htx.client.HTX.HTX;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -17,14 +18,15 @@ public class SingleTableTest {
   @Ignore
   @Test
   public void test() throws IOException {
+    byte[] tableName = toBytes("account");
     byte[] row1 = toBytes("1");
     byte[] row2 = toBytes("2");
     byte[] family = toBytes("balance");
     byte[] qualifier = toBytes("main");
 
     Configuration conf = HBaseConfiguration.create();
-    TransactionManager tm = new TransactionManager(conf);
-    HTXTable table = new HTXTable(conf, "account");
+    TransactionManager tm = HTX.getTransactionManager(conf);
+    HTXTable table = HTX.getTable(conf, tableName);
 
     Transaction ta = tm.begin();
     try {

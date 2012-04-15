@@ -15,7 +15,6 @@ import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import edu.illinois.htx.test.SequentialExecutorService;
 import edu.illinois.htx.test.StringKey;
 import edu.illinois.htx.test.StringKeyLog;
 import edu.illinois.htx.test.StringKeyLogRecord;
@@ -27,16 +26,13 @@ public class MVTOTransactionManagerTest {
 
   private MVTOTransactionManager<StringKey, StringKeyLogRecord> tm;
   private StringKeyValueStore kvs;
-  private SequentialExecutorService ses;
   private StringKeyLog log;
 
   @Before
   public void before() throws IOException {
     kvs = new StringKeyValueStore();
-    ses = new SequentialExecutorService();
     log = new StringKeyLog();
-    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, ses,
-        log);
+    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log);
     tm.start();
   }
 
@@ -60,7 +56,6 @@ public class MVTOTransactionManagerTest {
     tm.filterReads(1, singleton(key, versions));
     tm.filterReads(2, singleton(key, versions));
 
-    kvs.writeVersion(key, 1);
     try {
       tm.preWrite(1, false, keys);
       Assert.fail("transaction 1 should have failed write check");
@@ -76,15 +71,15 @@ public class MVTOTransactionManagerTest {
       Assert.fail("tran 2 aborted unexpectedly");
     }
 
-    ses.executedScheduledTasks();
+    tm.setFirstActive(2);
 
     // at this point we expect only version 2 of x to be present
     versions = kvs.readVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(0), it.next());
-    Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(2), it.next());
+    Assert.assertTrue(it.hasNext());
+    Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());
   }
 
@@ -123,7 +118,7 @@ public class MVTOTransactionManagerTest {
     versions = kvs.readVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(0), it.next());
+    Assert.assertEquals(Long.valueOf(1), it.next());
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());
@@ -174,8 +169,7 @@ public class MVTOTransactionManagerTest {
       Assert.assertTrue(e.getCause() instanceof IllegalStateException);
     }
 
-    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, ses,
-        log);
+    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log);
     tm.start();
     f = es.submit(commit2);
     tm.commit(1);
@@ -189,11 +183,11 @@ public class MVTOTransactionManagerTest {
     Iterable<Long> versions = kvs.readVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(0), it.next());
+    Assert.assertEquals(Long.valueOf(2), it.next());
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(1), it.next());
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(2), it.next());
+    Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());
   }
 

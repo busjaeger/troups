@@ -91,8 +91,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Long tid = getTID(put);
     if (tid == null)
       return;
-    if (getBoolean(put, HTXConstants.ATTR_NAME_BEG))
-      begin(tid);
     boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
     // create an HKey set view on the family map
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
@@ -131,8 +129,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Long tid = getTID(get);
     if (tid == null)
       return;
-    if (getBoolean(get, HTXConstants.ATTR_NAME_BEG))
-      begin(tid);
     // TODO check if results are already sorted by HBase; and verify newer
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);

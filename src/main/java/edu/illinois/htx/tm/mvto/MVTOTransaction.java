@@ -71,11 +71,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     while (!readFrom.isEmpty()) {
       state = BLOCKED;
       try {
-        // TODO re-think releasing lock here
-        tm.getLock().unlock();
         // TODO add timeout
         wait();
-        tm.getLock().lock();
       } catch (InterruptedException e) {
         Thread.interrupted();
       }
@@ -347,11 +344,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
         }
 
         /*
-         * Add write in progress, so readers can check if they see the version
-         */
-        tm.addWriter(key, this);
-
-        /*
          * record write so we can clean it up if the TA aborts. If it is a
          * delete, we also use this information to filter deleted versions from
          * reads results and to delete values from the underlying data store
@@ -359,6 +351,11 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          */
         tm.getLog().appendWrite(id, key, isDelete);
         addWrite(key, isDelete);
+        /*
+         * Add write in progress, so readers can check if they see the version
+         */
+        tm.addWriter(key, this);
+
       } finally {
         tm.unlock(key);
       }

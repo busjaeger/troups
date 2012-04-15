@@ -6,7 +6,7 @@ public class Result {
 
   private NavigableMap<byte[], NavigableMap<byte[], byte[]>> map;
 
-  Result(NavigableMap<byte[], NavigableMap<byte[], byte[]>> map) {
+  public Result(NavigableMap<byte[], NavigableMap<byte[], byte[]>> map) {
     this.map = map;
   }
 

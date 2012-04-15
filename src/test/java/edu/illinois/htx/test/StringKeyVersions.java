@@ -25,4 +25,9 @@ public class StringKeyVersions implements KeyVersions<StringKey> {
   public Iterable<Long> getVersions() {
     return versions;
   }
+
+  @Override
+  public String toString() {
+    return key.toString() + "-" + versions;
+  }
 }

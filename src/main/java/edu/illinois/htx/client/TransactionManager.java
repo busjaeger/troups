@@ -4,29 +4,19 @@ import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 
+import edu.illinois.htx.client.impl.TransactionManagerImpl;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tso.TimestampOracleProtocol;
 
-public class TransactionManager {
+public abstract class TransactionManager {
 
-  private final TimestampOracleProtocol tso;
-
-  public TransactionManager(Configuration conf) throws IOException {
-    this.tso = TimestampOracleClient.getClient();
+  public static TransactionManager get(Configuration conf) throws IOException {
+    return new TransactionManagerImpl(conf);
   }
 
-  public Transaction begin() throws IOException {
-    long id = tso.next();
-    return new Transaction(id);
-  }
+  public abstract Transaction begin();
 
-  public void rollback(Transaction ta) throws IOException {
-    ta.rollback();
-  }
+  public abstract void rollback(Transaction ta);
 
-  public void commit(Transaction ta) throws TransactionAbortedException,
-      IOException {
-    ta.commit();
-  }
+  public abstract void commit(Transaction ta) throws TransactionAbortedException;
 
 }

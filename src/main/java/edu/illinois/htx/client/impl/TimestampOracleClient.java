@@ -1,4 +1,4 @@
-package edu.illinois.htx.client;
+package edu.illinois.htx.client.impl;
 
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicLong;

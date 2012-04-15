@@ -32,4 +32,8 @@ public interface HTXConstants {
 
   public static final String DEFAULT_TM_LOG_TABLE_FAMILY_NAME = "log";
 
+  public static final String ZOOKEEPER_ZNODE_TRANSACTIONS = "zookeeper.znode.transactions";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_TRANSACTIONS = "transactions";
+
 }
