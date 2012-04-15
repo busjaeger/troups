@@ -12,14 +12,6 @@ public interface HTXConstants {
 
   // configuration properties
 
-  public static final String TSO_PORT = "htx.tso.port";
-
-  public static final int DEFAULT_TSO_PORT = 60001;
-
-  public static final String TSO_HANDLER_COUNT = "htx.tso.handler.count";
-
-  public static final int DEFAULT_TSO_HANDLER_COUNT = 25;
-
   public static final String TM_THREAD_COUNT = "htx.tm.thread.count";
 
   public static final int DEFAULT_TM_THREAD_COUNT = 10;
@@ -32,8 +24,24 @@ public interface HTXConstants {
 
   public static final String DEFAULT_TM_LOG_TABLE_FAMILY_NAME = "log";
 
+  public static final String TM_GC_INTERVAL = "htx.tm.gc.interval";
+
+  public static final long DEFAULT_TM_GC_INTERVAL = 5000l;
+
+  public static final String ZOOKEEPER_ZNODE_BASE = "zookeeper.znode.base";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_BASE = "htx";
+
   public static final String ZOOKEEPER_ZNODE_TRANSACTIONS = "zookeeper.znode.transactions";
 
   public static final String DEFAULT_ZOOKEEPER_ZNODE_TRANSACTIONS = "transactions";
+
+  public static final String ZOOKEEPER_ZNODE_COLLECTORS = "zookeeper.znode.collectors";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS = "collectors";
+
+  public static final String ZOOKEEPER_ZNODE_OAT = "zookeeper.znode.oldest-active-timestamp";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_OAT = "oat";
 
 }

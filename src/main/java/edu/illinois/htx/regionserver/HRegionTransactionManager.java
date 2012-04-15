@@ -1,5 +1,8 @@
 package edu.illinois.htx.regionserver;
 
+import static edu.illinois.htx.HTXConstants.DEFAULT_TM_THREAD_COUNT;
+import static edu.illinois.htx.HTXConstants.TM_THREAD_COUNT;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
@@ -9,6 +12,7 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.KeyValue;
@@ -26,6 +30,7 @@ import org.apache.hadoop.hbase.regionserver.InternalScanner;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
@@ -52,29 +57,43 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       .getComparatorIgnoringTimestamps();
 
   private MVTOTransactionManager<HKey, HLogRecord> tm;
+  private ScheduledExecutorService pool;
+  private TimestampCollector collector;
 
   @Override
   public void start(CoprocessorEnvironment e) throws IOException {
     RegionCoprocessorEnvironment env = ((RegionCoprocessorEnvironment) e);
+    Configuration conf = env.getConfiguration();
+
+    // create thread pool
+    int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
+    pool = Executors.newScheduledThreadPool(count);
+
+    // create timestamp collector
+    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
+    collector = new TimestampCollector(conf, pool, zkw);
+
+    // create transaction manager
     HRegion region = env.getRegion();
+    HRegionKeyValueStore kvs = new HRegionKeyValueStore(region);
     HRegionInfo regionInfo = region.getRegionInfo();
     HConnection connection = env.getRegionServerServices().getCatalogTracker()
         .getConnection();
-    HRegionKeyValueStore kvs = new HRegionKeyValueStore(region);
-    int count = env.getConfiguration().getInt(HTXConstants.TM_THREAD_COUNT,
-        HTXConstants.DEFAULT_TSO_HANDLER_COUNT);
-    ScheduledExecutorService pool = Executors.newScheduledThreadPool(count);
     HRegionLog tlog = HRegionLog.newInstance(connection, pool, regionInfo);
-    tm = new MVTOTransactionManager<HKey, HLogRecord>(kvs, pool, tlog);
+    tm = new MVTOTransactionManager<HKey, HLogRecord>(kvs, tlog);
   }
 
   @Override
-  public void preOpen(ObserverContext<RegionCoprocessorEnvironment> e) {
+  public void preOpen(ObserverContext<RegionCoprocessorEnvironment> ctx) {
     try {
+      // 1. start transaction manager
       tm.start();
-    } catch (IOException e1) {
+
+      // 2. start collector
+      collector.start();
+    } catch (IOException e) {
       // either aborts region server or removes co-processor
-      throw new IllegalStateException(e1);
+      throw new IllegalStateException(e);
     }
   }
 
@@ -82,7 +101,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   public void postClose(ObserverContext<RegionCoprocessorEnvironment> e,
       boolean abortRequested) {
     tm.stop();
-    tm.getExecutorService().shutdown();
   }
 
   @Override

@@ -2,7 +2,7 @@ package edu.illinois.htx.tm;
 
 import java.io.IOException;
 
-public interface KeyValueStore<T extends Key> {
+public interface KeyValueStore<K extends Key> {
 
   /**
    * Deletes a specific version from this KeyValueStore. Operation is expected
@@ -11,7 +11,7 @@ public interface KeyValueStore<T extends Key> {
    * @param key
    * @param version
    */
-  void deleteVersion(T key, long version) throws IOException;
+  void deleteVersion(K key, long version) throws IOException;
 
   /**
    * Deletes all versions older than the given version (inclusive). If operation
@@ -21,6 +21,6 @@ public interface KeyValueStore<T extends Key> {
    * @param key
    * @param version
    */
-  void deleteVersions(T key, long version) throws IOException;
+  void deleteVersions(K key, long version) throws IOException;
 
 }

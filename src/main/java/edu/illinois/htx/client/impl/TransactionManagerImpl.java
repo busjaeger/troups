@@ -1,6 +1,8 @@
 package edu.illinois.htx.client.impl;
 
+import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_TRANSACTIONS;
+import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_TRANSACTIONS;
 
 import java.io.IOException;
@@ -9,6 +11,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
+import org.apache.zookeeper.CreateMode;
 
 import edu.illinois.htx.client.Transaction;
 import edu.illinois.htx.client.TransactionManager;
@@ -17,7 +20,6 @@ import edu.illinois.htx.util.ZKUtil;
 
 public class TransactionManagerImpl extends TransactionManager {
 
-  private final String transZNode;
   private final String transDir;
   private final HConnection connection;
   private final ZooKeeperWatcher zkw;
@@ -25,16 +27,19 @@ public class TransactionManagerImpl extends TransactionManager {
   @SuppressWarnings("deprecation")
   public TransactionManagerImpl(Configuration conf) throws IOException {
     this.connection = HConnectionManager.getConnection(conf);
+    this.zkw = connection.getZooKeeperWatcher();
+    String htx = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
+    String htxZNode = ZKUtil.joinZNode(zkw.baseZNode, htx);
     String trans = conf.get(ZOOKEEPER_ZNODE_TRANSACTIONS,
         DEFAULT_ZOOKEEPER_ZNODE_TRANSACTIONS);
-    this.zkw = connection.getZooKeeperWatcher();
-    this.transZNode = ZKUtil.joinZNode(zkw.baseZNode, trans);
+    String transZNode = ZKUtil.joinZNode(htxZNode, trans);
     this.transDir = ZKUtil.appendSeparator(transZNode);
   }
 
   public Transaction begin() {
     try {
-      String tranZNode = ZKUtil.createSequentialWithParent(zkw, transDir);
+      String tranZNode = ZKUtil.createSequentialWithParents(zkw, transDir,
+          CreateMode.PERSISTENT_SEQUENTIAL);
       long id = Long.parseLong(ZKUtil.getNodeName(tranZNode));
       String clientNode = ZKUtil.createEphemeral(zkw,
           ZKUtil.joinZNode(tranZNode, "client"));

@@ -97,6 +97,7 @@ public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
   }
 
   public void stop() throws IOException {
+    // don't need to close log table, since we are using our own connection
     logTable.close();
   }
 
