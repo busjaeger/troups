@@ -37,6 +37,7 @@ import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.HTXConstants;
 import edu.illinois.htx.tm.KeyVersions;
+import edu.illinois.htx.tm.TimestampListener;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
 
@@ -51,7 +52,7 @@ import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
  * </ol>
  */
 public class HRegionTransactionManager extends BaseRegionObserver implements
-    HRegionTransactionManagerProtocol {
+    HRegionTransactionManagerProtocol, TimestampListener {
 
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
@@ -59,6 +60,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private MVTOTransactionManager<HKey, HLogRecord> tm;
   private ScheduledExecutorService pool;
   private TimestampCollector collector;
+  private volatile long oldestTimestamp;
 
   @Override
   public void start(CoprocessorEnvironment e) throws IOException {
@@ -69,10 +71,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
     pool = Executors.newScheduledThreadPool(count);
 
-    // create timestamp collector
-    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
-    collector = new TimestampCollector(conf, pool, zkw);
-
     // create transaction manager
     HRegion region = env.getRegion();
     HRegionKeyValueStore kvs = new HRegionKeyValueStore(region);
@@ -81,6 +79,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         .getConnection();
     HRegionLog tlog = HRegionLog.newInstance(connection, pool, regionInfo);
     tm = new MVTOTransactionManager<HKey, HLogRecord>(kvs, tlog);
+
+    // create timestamp collector
+    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
+    collector = new TimestampCollector(conf, pool, zkw);
+    collector.addListener(this);
+    collector.addListener(tm);
   }
 
   @Override
@@ -161,13 +165,18 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (e.getEnvironment().getRegion().getRegionInfo().isMetaTable()) {
       return scanner;
     } else {
-      return scanner;// TODO
+      return new VersionCollector(scanner, oldestTimestamp);
     }
   }
 
   @Override
   public void begin(long tid) throws IOException {
     tm.begin(tid);
+  }
+
+  @Override
+  public int enlist(long tid) throws IOException {
+    return 0;
   }
 
   @Override
@@ -191,6 +200,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       long clientVersion, int clientMethodsHash) throws IOException {
     return new ProtocolSignature(getProtocolVersion(protocol, clientVersion),
         null);
+  }
+
+  @Override
+  public void oldestTimestampChanged(long timestamp) {
+    oldestTimestamp = timestamp;
   }
 
   private static Long getTID(OperationWithAttributes operation) {
@@ -302,4 +316,5 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       };
     };
   }
+
 }

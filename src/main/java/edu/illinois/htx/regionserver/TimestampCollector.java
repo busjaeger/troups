@@ -15,23 +15,26 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.hbase.zookeeper.ZooKeeperListener;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
+import edu.illinois.htx.tm.TimestampListener;
 import edu.illinois.htx.util.ZKUtil;
 
-public class TimestampCollector implements Runnable {
+public class TimestampCollector extends ZooKeeperListener implements Runnable {
 
   private final Configuration conf;
   private final ScheduledExecutorService pool;
-  private final ZooKeeperWatcher zkw;
+  private final List<TimestampListener> listeners;
 
   private String zNode;
 
@@ -43,19 +46,26 @@ public class TimestampCollector implements Runnable {
 
   public TimestampCollector(Configuration conf, ScheduledExecutorService pool,
       ZooKeeperWatcher zkw) {
+    super(zkw);
     this.conf = conf;
     this.pool = pool;
-    this.zkw = zkw;
+    this.listeners = new CopyOnWriteArrayList<TimestampListener>();
   }
 
   void start() throws IOException {
+    watcher.registerListener(this);
     String collectors = conf.get(ZOOKEEPER_ZNODE_COLLECTORS,
         DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS);
     String collectorsNode = ZKUtil.joinZNode(getHTXZNode(), collectors);
     String collectorsDir = ZKUtil.appendSeparator(collectorsNode);
-    zNode = ZKUtil.createSequentialWithParents(zkw, collectorsDir,
+    zNode = ZKUtil.createSequentialWithParents(watcher, collectorsDir,
         CreateMode.EPHEMERAL_SEQUENTIAL);
     tryToBecomeCollector();
+    nodeDataChanged(getOATZNode());// get initial OAT
+  }
+
+  void addListener(TimestampListener listener) {
+    this.listeners.add(listener);
   }
 
   private void tryToBecomeCollector() throws IOException {
@@ -67,7 +77,8 @@ public class TimestampCollector implements Runnable {
   }
 
   private boolean becomeCollector() throws IOException {
-    List<String> children = ZKUtil.getChildren(zkw, ZKUtil.getParent(zNode));
+    List<String> children = ZKUtil
+        .getChildren(watcher, ZKUtil.getParent(zNode));
     String preceeding = null;
     // loop until we are the leader or we follow someone
     while (true) {
@@ -78,7 +89,7 @@ public class TimestampCollector implements Runnable {
       // this is the leader
       if (preceeding == null)
         return true;
-      if (ZKUtil.setWatch(zkw, preceeding, new Watcher() {
+      if (ZKUtil.setWatch(watcher, preceeding, new Watcher() {
         @Override
         public void process(WatchedEvent event) {
           switch (event.getType()) {
@@ -101,14 +112,28 @@ public class TimestampCollector implements Runnable {
   }
 
   @Override
+  public void nodeDataChanged(String path) {
+    if (getOATZNode().equals(path)) {
+      try {
+        long oat = getOAT();
+        for (TimestampListener listener : listeners)
+          listener.oldestTimestampChanged(oat);
+      } catch (IOException e) {
+        e.printStackTrace();
+        System.err.println("Failed to retrieve OAT");
+      }
+    }
+  }
+
+  @Override
   public void run() {
     try {
       if (!oatSet) {
-        setOAT();
+        initOAT();
         oatSet = true;
       }
 
-      List<String> children = ZKUtil.getChildren(zkw, transZNode);
+      List<String> children = ZKUtil.getChildren(watcher, transZNode);
       Collections.sort(children);
 
       int newOat = oat;
@@ -118,13 +143,13 @@ public class TimestampCollector implements Runnable {
         if (tid < oat)
           toDelete.add(child);
         else if (tid >= oat) {
-          byte[] data = ZKUtil.getData(zkw, child);
+          byte[] data = ZKUtil.getData(watcher, child);
           if (data == null) {
             System.err.println("node " + child + " disappeared");
             continue;
           }
           if (data.length == 0) {
-            if (!ZKUtil.getChildren(zkw, child).isEmpty()) {
+            if (!ZKUtil.getChildren(watcher, child).isEmpty()) {
               // transaction is active
               oat = tid;
               break;
@@ -135,26 +160,32 @@ public class TimestampCollector implements Runnable {
       }
 
       if (newOat != oat) {
-        ZKUtil.setData(zkw, getOATZNode(), Bytes.toBytes(newOat));
+        ZKUtil.setData(watcher, getOATZNode(), Bytes.toBytes(newOat));
         oat = newOat;
       }
 
       for (String delete : toDelete)
-        ZKUtil.delete(zkw, delete);
+        ZKUtil.delete(watcher, delete);
     } catch (IOException e) {
       e.printStackTrace();
     }
   }
 
-  private void setOAT() throws IOException {
+  private void initOAT() throws IOException {
     String oatZNode = getOATZNode();
-    byte[] data = ZKUtil.getData(zkw, oatZNode);
+    byte[] data = ZKUtil.getData(watcher, oatZNode);
     if (data == null) {
       data = Bytes.toBytes(oat = 0);
-      ZKUtil.create(zkw, oatZNode, data, CreateMode.PERSISTENT);
+      ZKUtil.create(watcher, oatZNode, data, CreateMode.PERSISTENT);
     } else {
       oat = Bytes.toInt(data);
     }
+  }
+
+  private long getOAT() throws IOException {
+    String oatZNode = getOATZNode();
+    byte[] data = ZKUtil.getData(watcher, oatZNode);
+    return data == null ? 0 : Bytes.toInt(data);
   }
 
   String getTransZNode() {
@@ -176,6 +207,6 @@ public class TimestampCollector implements Runnable {
 
   String getHTXZNode() {
     String htx = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
-    return ZKUtil.joinZNode(zkw.baseZNode, htx);
+    return ZKUtil.joinZNode(watcher.baseZNode, htx);
   }
 }

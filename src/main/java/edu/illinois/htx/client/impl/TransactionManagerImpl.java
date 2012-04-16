@@ -41,6 +41,8 @@ public class TransactionManagerImpl extends TransactionManager {
       String tranZNode = ZKUtil.createSequentialWithParents(zkw, transDir,
           CreateMode.PERSISTENT_SEQUENTIAL);
       long id = Long.parseLong(ZKUtil.getNodeName(tranZNode));
+      // TODO: retry - could fail if transaction node got GC'ed before we could
+      // create child
       String clientNode = ZKUtil.createEphemeral(zkw,
           ZKUtil.joinZNode(tranZNode, "client"));
       return new LocalTransaction(id, zkw, tranZNode, clientNode);

@@ -1,5 +1,7 @@
 package edu.illinois.htx.client;
 
+import java.io.IOException;
+
 import org.apache.hadoop.hbase.client.HTable;
 
 import edu.illinois.htx.tm.TransactionAbortedException;
@@ -11,7 +13,7 @@ public interface Transaction {
 
   public long getID();
 
-  public void enlist(HTable table, byte[] row);
+  public void enlist(HTable table, byte[] row) throws IOException;
 
   public void rollback();
 

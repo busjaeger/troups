@@ -71,7 +71,7 @@ public class MVTOTransactionManagerTest {
       Assert.fail("tran 2 aborted unexpectedly");
     }
 
-    tm.setFirstActive(2);
+    tm.oldestTimestampChanged(2);
 
     // at this point we expect only version 2 of x to be present
     versions = kvs.readVersions(key);

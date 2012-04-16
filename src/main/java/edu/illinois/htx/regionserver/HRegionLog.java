@@ -27,7 +27,7 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.io.DataInputBuffer;
-import org.apache.hadoop.io.DataOutputBuffer;
+import org.apache.hadoop.io.WritableUtils;
 
 import edu.illinois.htx.tm.AbstractLog;
 import edu.illinois.htx.tm.LogRecord.Type;
@@ -158,14 +158,7 @@ public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
     byte[] row = rows.get(record.getTID());
     long timestamp = record.getSID();
     byte[] qualifier = regionInfo.getTableName();
-    DataOutputBuffer buffer = new DataOutputBuffer();
-    try {
-      record.write(buffer);
-    } catch (IOException e) {
-      // shouldn't happen, we are writing into memory
-      throw new RuntimeException(e);
-    }
-    byte[] value = buffer.getData();
+    byte[] value = WritableUtils.toByteArray(record);
     Put put = new Put(row, timestamp);
     put.add(family, qualifier, value);
     return put;

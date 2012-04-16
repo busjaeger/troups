@@ -26,6 +26,7 @@ import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord;
+import edu.illinois.htx.tm.TimestampListener;
 import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.MultiversionTransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
@@ -87,7 +88,7 @@ import edu.illinois.htx.tm.TransactionAbortedException;
  * </ol>
  */
 public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
-    implements MultiversionTransactionManager<K> {
+    implements MultiversionTransactionManager<K>, TimestampListener {
 
   // immutable state
   // key value store this TM is governing
@@ -394,7 +395,8 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   }
 
   // garbage collection
-  public void setFirstActive(long ts) {
+  @Override
+  public void oldestTimestampChanged(long ts) {
     for (MVTOTransaction<K> ta : getTransactions()) {
       long tid = ta.getID();
       if (tid >= ts)
@@ -403,8 +405,16 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
       case ACTIVE:
       case BLOCKED:
         // this could theoretically happen, but should be rare
-        System.out.println("WARNING: found active TAs before 'first active' "
+        System.out.println("WARNING: found active TAs before oldest timestamp "
             + tid);
+        try {
+          ta.abort();
+        } catch (IOException e) {
+          // TODO
+          e.printStackTrace();
+        }
+        if (ta.isFinalized())
+          removeTransaction(ta);
         return;
       case ABORTED:
         // if readBy is empty (all TAs that read from it are aborted) and

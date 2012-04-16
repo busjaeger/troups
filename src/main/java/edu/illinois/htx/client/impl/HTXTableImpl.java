@@ -96,7 +96,7 @@ public class HTXTableImpl implements HTXTable {
   }
 
   private org.apache.hadoop.hbase.client.Put createTransactionPut(
-      Mutation mutation, Transaction ta) {
+      Mutation mutation, Transaction ta) throws IOException {
     byte[] row = mutation.getRow();
     ta.enlist(hTable, row);
     long timestamp = ta.getID();

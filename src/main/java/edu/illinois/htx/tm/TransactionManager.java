@@ -7,7 +7,7 @@ public interface TransactionManager {
   public static final long VERSION = 1L;
 
   /**
-   * Begins a new transaction with the given transaction ID
+   * Begins a new local transaction with the given transaction ID
    * 
    * @param tid
    * @throws IllegalStateException
@@ -16,6 +16,8 @@ public interface TransactionManager {
    *           if the given transaction ID is invalid
    */
   void begin(long tid) throws IOException;
+
+  int enlist(long tid) throws IOException;
 
   void commit(long tid) throws TransactionAbortedException, IOException;
 
