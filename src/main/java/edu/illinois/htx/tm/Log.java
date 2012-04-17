@@ -4,28 +4,31 @@ import java.io.IOException;
 
 import edu.illinois.htx.tm.LogRecord.Type;
 
-public interface Log<K extends Key, R extends LogRecord<K>> {
+public abstract class Log<K extends Key, R extends LogRecord<K>> {
 
-  R newRecord(Type type, long tid, K key, long version);
+  public abstract R newRecord(Type type, long tid, K key, Long version);
 
-  void append(R record) throws IOException;
+  public abstract void append(R record) throws IOException;
 
-  long appendBegin(long tid) throws IOException;
+  public abstract void savepoint(long sid) throws IOException;
 
-  long appendCommit(long tid) throws IOException;
+  public abstract Iterable<R> recover() throws IOException;
 
-  long appendAbort(long tid) throws IOException;
+  // convenience methods
 
-  long appendFinalize(long tid) throws IOException;
+  public long append(Type type, long tid) throws IOException {
+    return append(type, tid, null);
+  }
 
-  long appendRead(long tid, K key, long version) throws IOException;
+  public long append(Type type, long tid, K key) throws IOException {
+    return append(type, tid, key, null);
+  }
 
-  long appendWrite(long tid, K key, boolean isDelete) throws IOException;
-
-  void savepoint(long sid) throws IOException;
-
-  Iterable<R> start() throws IOException;
-
-  void stop() throws IOException;
+  public long append(Type type, long tid, K key, Long version)
+      throws IOException {
+    R record = newRecord(type, tid, key, version);
+    append(record);
+    return record.getSID();
+  }
 
 }

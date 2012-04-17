@@ -4,11 +4,10 @@ import java.io.IOException;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import edu.illinois.htx.tm.AbstractLog;
+import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord.Type;
 
-public class StringKeyLog extends
-    AbstractLog<StringKey, StringKeyLogRecord> {
+public class StringKeyLog extends Log<StringKey, StringKeyLogRecord> {
 
   private NavigableMap<Long, StringKeyLogRecord> log;
   private long seqid;
@@ -20,7 +19,7 @@ public class StringKeyLog extends
 
   @Override
   public StringKeyLogRecord newRecord(Type type, long tid, StringKey key,
-      long version) {
+      Long version) {
     return new StringKeyLogRecord(seqid++, tid, type, key, version);
   }
 
@@ -35,12 +34,8 @@ public class StringKeyLog extends
   }
 
   @Override
-  public Iterable<StringKeyLogRecord> start() throws IOException {
+  public Iterable<StringKeyLogRecord> recover() throws IOException {
     return log.values();
-  }
-
-  @Override
-  public void stop() throws IOException {
   }
 
 }

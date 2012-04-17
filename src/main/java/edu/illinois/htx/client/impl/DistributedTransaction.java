@@ -17,57 +17,122 @@ import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
 import edu.illinois.htx.client.Transaction;
+import edu.illinois.htx.regionserver.RTM;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.util.ZKUtil;
+import edu.illinois.htx.tsm.TimestampState;
+import edu.illinois.htx.tsm.XATimestampManager;
+import edu.illinois.htx.tsm.XATimestampManager.ParticipantListener;
 
-public class DistributedTransaction extends AbstractTransaction implements
-    Transaction, Watcher {
+public class DistributedTransaction implements Transaction, Watcher {
 
+  private static enum State {
+    CREATED, ACTIVE, COMMITTING, DONE
+  }
+
+  private long id;
+  private final XATimestampManager tsm;
   private final Set<RowGroup> groups = new HashSet<RowGroup>();
-  private final Map<Integer, Boolean> votes = new TreeMap<Integer, Boolean>();
-  private boolean committing = false;
+  private final Map<Long, Boolean> votes = new TreeMap<Long, Boolean>();
+  private State state;
 
-  DistributedTransaction(long id, ZooKeeperWatcher zkw, String node,
-      String eNode) {
-    super(id, zkw, node, eNode);
+  DistributedTransaction(XATimestampManager tsm) {
+    this.tsm = tsm;
+    this.state = State.CREATED;
+  }
+
+  void begin() throws IOException {
+    switch (state) {
+    case CREATED:
+      break;
+    case ACTIVE:
+    case COMMITTING:
+    case DONE:
+      throw newISA("begin");
+    }
+    this.id = tsm.next();
   }
 
   @Override
-  public void enlist(HTable table, byte[] row) throws IOException {
-    HTableDescriptor descr = table.getTableDescriptor();
-    byte[] tableName = descr.getName();
+  public long enlist(HTable table, byte[] row) throws IOException {
+    switch (state) {
+    case ACTIVE:
+      break;
+    case COMMITTING:
+    case CREATED:
+    case DONE:
+      throw newISA("enlist");
+    }
+
     // TODO remove hard-coded split policy
     byte[] rootRow = Arrays.copyOf(row, Math.min(4, row.length));
-    RowGroup group = new RowGroup(tableName, rootRow);
+    RowGroup group = new RowGroup(table, rootRow);
 
     // this is a new row group -> enlist RTM in transaction
     if (groups.add(group)) {
-      int partId = getRTM(table, rootRow).enlist(id);
-      String partNode = ZKUtil.joinZNode(tranNode, String.valueOf(partId));
-      if (!ZKUtil.setWatch(zkw, partNode, this)) {
+      long pid = getRTM(group).join(id);
+      if (!tsm.addListener(id, pid, new RTMListener(pid))) {
         rollback();
-        throw new TransactionAbortedException("Participant failed");
+        throw new TransactionAbortedException();
       }
     }
+    return this.id;
+  }
+
+  protected RTM getRTM(RowGroup group) {
+    return group.getTable().coprocessorProxy(RTM.class, group.getRootRow());
   }
 
   @Override
   public synchronized void rollback() {
-    if (done)
+    switch (state) {
+    case ACTIVE:
+      break;
+    case COMMITTING:
+    case CREATED:
+      throw newISA("rollback");
+    case DONE:
       return;
-    if (committing)
-      throw new IllegalStateException("Cannot rollback after commit issued");
-    done();
+    }
+
+    // TODO use separate threads
+    try {
+      for (RowGroup group : groups)
+        getRTM(group).abort(id);
+    } catch (IOException e) {
+      e.printStackTrace();
+      // ignore
+    }
+
+    try {
+      tsm.done(id);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   @Override
   public synchronized void commit() throws TransactionAbortedException {
-    if (done)
+    switch (state) {
+    case ACTIVE:
+      break;
+    case COMMITTING:
+    case CREATED:
+      throw newISA("rollback");
+    case DONE:
       return;
-    if (committing)
-      throw new IllegalStateException("Already committing");
-    initPrepare();
-    while (!done) {
+    }
+
+    // 1. Phase: ask all participants to prepare
+    // TODO use separate threads
+    try {
+      for (RowGroup group : groups)
+        getRTM(group).prepare(id);
+    } catch (IOException e) {
+      rollback();
+      throw new TransactionAbortedException(e);
+    }
+
+    while (state != State.DONE) {
       try {
         wait();
       } catch (InterruptedException e) {
@@ -77,23 +142,20 @@ public class DistributedTransaction extends AbstractTransaction implements
     }
   }
 
-  // 1. Phase: prepare
-  private synchronized void initPrepare() throws TransactionAbortedException {
-    try {
-      ZKUtil.setData(zkw, clientNode, Bytes.toBytes("prepared"));
-    } catch (IOException e) {
-      rollback();
-      throw new TransactionAbortedException(e);
-    }
-  }
+  synchronized void setPrepared(long partId) {
+    votes.put(partId, true);
+    for (Boolean vote : votes.values())
+      if (!vote)
+        return;
 
-  // 2. Phase: commit
-  private synchronized void initCommitting() {
-    Map<Integer, Boolean> doneVotes = new TreeMap<Integer, Boolean>(votes);
-    for (Entry<Integer, Boolean> entry : doneVotes.entrySet())
+    // 2. Phase: all participants have vowed to commit > write record
+    Map<Long, Boolean> doneVotes = new TreeMap<Long, Boolean>(votes);
+    for (Entry<Long, Boolean> entry : doneVotes.entrySet())
       entry.setValue(false);
-    byte[] state = WritableUtils.toByteArray(new TransactionState(false,
+    byte[] state = WritableUtils.toByteArray(new TimestampState(false,
         doneVotes));
+    
+    
     try {
       ZKUtil.setWatch(zkw, tranNode, this);
       ZKUtil.setData(zkw, tranNode, state);
@@ -116,7 +178,7 @@ public class DistributedTransaction extends AbstractTransaction implements
         break;
       case NodeDataChanged:
         String path = event.getPath();
-        int partId = Integer.parseInt(ZKUtil.getNodeName(path));
+        long partId = Long.parseLong(ZKUtil.getNodeName(path));
         votes.put(partId, true);
         for (Boolean vote : votes.values())
           if (!vote)
@@ -131,9 +193,9 @@ public class DistributedTransaction extends AbstractTransaction implements
       case NodeDataChanged:
         String path = event.getPath();
         if (path.equals(tranNode)) {
-          TransactionState state = new TransactionState();
+          TimestampState state;
           try {
-            state.readFields(ZKUtil.getData(zkw, tranNode));
+            state = new TimestampState(ZKUtil.getData(zkw, tranNode));
           } catch (IOException e) {
             // TODO probably OK to ignore
             return;
@@ -148,5 +210,33 @@ public class DistributedTransaction extends AbstractTransaction implements
         break;
       }
     }
+  }
+
+  private IllegalStateException newISA(String op) {
+    return new IllegalStateException("Cannot " + op + " Transaction: " + this);
+  }
+
+  private class RTMListener implements ParticipantListener {
+
+    private final long pid;
+
+    RTMListener(long pid) {
+      this.pid = pid;
+    }
+
+    @Override
+    public void prepared() {
+      setPrepared(pid);
+    }
+
+    @Override
+    public void aborted() {
+      rollback();
+    }
+
+    @Override
+    public void committed() {
+    }
+
   }
 }

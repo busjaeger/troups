@@ -54,11 +54,11 @@ public class HTXTableImpl implements HTXTable {
   @Override
   public Result get(Transaction ta, Get get) throws IOException {
     byte[] row = get.getRow();
-    ta.enlist(hTable, row);
+    long tid = ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Get hGet = new org.apache.hadoop.hbase.client.Get(
         row);
-    setTransaction(hGet, ta);
-    hGet.setTimeRange(0L, ta.getID());
+    setTransaction(hGet, tid);
+    hGet.setTimeRange(0L, tid);
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
         .entrySet())
       for (byte[] column : entry.getValue())
@@ -98,17 +98,15 @@ public class HTXTableImpl implements HTXTable {
   private org.apache.hadoop.hbase.client.Put createTransactionPut(
       Mutation mutation, Transaction ta) throws IOException {
     byte[] row = mutation.getRow();
-    ta.enlist(hTable, row);
-    long timestamp = ta.getID();
+    long tid = ta.enlist(hTable, row);
     org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
-        row, timestamp);
-    setTransaction(hPut, ta);
+        row, tid);
+    setTransaction(hPut, tid);
     return hPut;
   }
 
-  private static void setTransaction(OperationWithAttributes operation,
-      Transaction ta) {
-    byte[] tsBytes = Bytes.toBytes(ta.getID());
+  private static void setTransaction(OperationWithAttributes operation, long tid) {
+    byte[] tsBytes = Bytes.toBytes(tid);
     operation.setAttribute(HTXConstants.ATTR_NAME_TID, tsBytes);
   }
 

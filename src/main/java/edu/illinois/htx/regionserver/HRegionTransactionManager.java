@@ -8,6 +8,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NavigableSet;
 import java.util.NoSuchElementException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -37,9 +40,9 @@ import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.HTXConstants;
 import edu.illinois.htx.tm.KeyVersions;
-import edu.illinois.htx.tm.TimestampListener;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
+import edu.illinois.htx.tsm.TimestampListener;
 
 /**
  * TODO (in order of priority):
@@ -52,7 +55,7 @@ import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
  * </ol>
  */
 public class HRegionTransactionManager extends BaseRegionObserver implements
-    HRegionTransactionManagerProtocol, TimestampListener {
+    RTM, TimestampListener {
 
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
@@ -113,11 +116,13 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Long tid = getTID(put);
     if (tid == null)
       return;
+    if (put.getTimeStamp() != tid)
+      throw new IllegalArgumentException("timestamp does not match tid");
     boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
     // create an HKey set view on the family map
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
-    tm.preWrite(tid, isDelete, keys);
+    tm.beforeWrite(tid, isDelete, keys);
   }
 
   @Override
@@ -129,20 +134,22 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
-    tm.postWrite(tid, isDelete, keys);
+    tm.beforeWrite(tid, isDelete, keys);
   }
 
   @Override
-  public void preGet(ObserverContext<RegionCoprocessorEnvironment> e, Get get,
-      List<KeyValue> results) throws IOException {
+  public void preGet(ObserverContext<RegionCoprocessorEnvironment> e,
+      final Get get, List<KeyValue> results) throws IOException {
     Long tid = getTID(get);
     if (tid == null)
       return;
     TimeRange tr = get.getTimeRange();
-    if (tr.getMin() != 0L || tr.getMax() != tid)// check default
-      System.out.println("WARNING: setting timerange to "
-          + new TimeRange(0L, tid) + " from " + tr);
-    get.setTimeRange(0L, tid);
+    if (tr.getMin() != 0L || tr.getMax() != tid)
+      throw new IllegalArgumentException(
+          "timerange does not match tid: (expected: " + new TimeRange(0L, tid)
+              + "), (actual: " + tr);
+    Iterable<HKey> keys = transform(get.getRow(), get.getFamilyMap());
+    tm.beforeRead(tid, keys);
   }
 
   @Override
@@ -155,7 +162,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);
     Iterable<KeyVersions<HKey>> kvs = transform(results);
-    tm.filterReads(tid, kvs);
+    tm.afterRead(tid, kvs);
   }
 
   @Override
@@ -170,13 +177,18 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void begin(long tid) throws IOException {
-    tm.begin(tid);
+  public void join(long tid) throws IOException {
+    tm.join(tid);
   }
 
   @Override
-  public int enlist(long tid) throws IOException {
-    return 0;
+  public long join(long tid) throws IOException {
+    return tm.join(tid);
+  }
+
+  @Override
+  public void prepare(long tid) throws IOException {
+    tm.prepare(tid);
   }
 
   @Override
@@ -192,7 +204,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public long getProtocolVersion(String protocol, long clientVersion)
       throws IOException {
-    return HRegionTransactionManagerProtocol.VERSION;
+    return RTM.VERSION;
   }
 
   @Override
@@ -203,7 +215,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void oldestTimestampChanged(long timestamp) {
+  public void deleted(long timestamp) {
     oldestTimestamp = timestamp;
   }
 
@@ -317,4 +329,21 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     };
   }
 
+  private Iterable<HKey> transform(final byte[] row,
+      Map<byte[], NavigableSet<byte[]>> familyMap) {
+    return Iterables.concat(Iterables.transform(familyMap.entrySet(),
+        new Function<Entry<byte[], NavigableSet<byte[]>>, Iterable<HKey>>() {
+          @Override
+          public Iterable<HKey> apply(
+              final Entry<byte[], NavigableSet<byte[]>> entry) {
+            return Iterables.transform(entry.getValue(),
+                new Function<byte[], HKey>() {
+                  @Override
+                  public HKey apply(byte[] qualifier) {
+                    return new HKey(row, entry.getKey(), qualifier);
+                  }
+                });
+          }
+        }));
+  }
 }

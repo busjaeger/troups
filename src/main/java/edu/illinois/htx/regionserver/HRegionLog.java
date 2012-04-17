@@ -29,11 +29,11 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.WritableUtils;
 
-import edu.illinois.htx.tm.AbstractLog;
+import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord.Type;
 
 // TODO start/stop behavior
-public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
+public class HRegionLog extends Log<HKey, HLogRecord> {
 
   public static HRegionLog newInstance(HConnection connection,
       ExecutorService pool, HRegionInfo regionInfo) throws IOException {
@@ -47,6 +47,7 @@ public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
   }
 
   private final HRegionInfo regionInfo;
+  // don't need to close log table, since we are using our own connection
   private final HTable logTable;
   private final byte[] family;
   private final AtomicLong sid;
@@ -63,7 +64,8 @@ public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
     this.begins = new ConcurrentHashMap<Long, HLogRecord>();
   }
 
-  public Iterable<HLogRecord> start() throws IOException {
+  @Override
+  public Iterable<HLogRecord> recover() throws IOException {
     Scan scan = createScan();
     ResultScanner scanner = logTable.getScanner(scan);
     SortedSet<HLogRecord> records = new TreeSet<HLogRecord>();
@@ -96,26 +98,19 @@ public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
     return records;
   }
 
-  public void stop() throws IOException {
-    // don't need to close log table, since we are using our own connection
-    logTable.close();
-  }
-
   @Override
-  public HLogRecord newRecord(Type type, long tid, HKey key, long version) {
+  public HLogRecord newRecord(Type type, long tid, HKey key, Long version) {
     return new HLogRecord(sid.getAndIncrement(), tid, type, key, version);
-  }
-
-  // don't append the begin, because we don't know the row yet
-  @Override
-  public long appendBegin(long tid) {
-    HLogRecord record = newRecord(Type.BEGIN, tid, null, -1);
-    begins.put(tid, record);
-    return record.getSID();
   }
 
   @Override
   public void append(HLogRecord record) throws IOException {
+    // don't append begin, because we don't know the row yet
+    if (record.getType() == Type.BEGIN) {
+      begins.put(record.getTID(), record);
+      return;
+    }
+
     List<Put> puts = new ArrayList<Put>(2);
     HLogRecord beginRecord = begins.remove(record.getTID());
     if (beginRecord != null) {
@@ -132,6 +127,7 @@ public class HRegionLog extends AbstractLog<HKey, HLogRecord> {
   /*
    * any better way to do this?? It seems there is no 'delete' scanner API.
    */
+  // TODO set save-point, delete later?
   @Override
   public void savepoint(long sid) throws IOException {
     Scan scan = createScan();

@@ -16,13 +16,13 @@ public class HLogRecord implements LogRecord<HKey>, Writable, Comparable<HLogRec
   private long tid;
   private Type type;
   private HKey key;
-  private long version;
+  private Long version;
 
   public HLogRecord() {
     super();
   }
 
-  public HLogRecord(long sid, long tid, Type type, HKey key, long version) {
+  public HLogRecord(long sid, long tid, Type type, HKey key, Long version) {
     this.sid = sid;
     this.tid = tid;
     this.type = type;
@@ -67,7 +67,10 @@ public class HLogRecord implements LogRecord<HKey>, Writable, Comparable<HLogRec
     out.writeLong(tid);
     out.writeInt(type.ordinal());
     key.write(out);
-    out.writeLong(version);
+    boolean hasVersion = version != null;
+    out.writeBoolean(hasVersion);
+    if (hasVersion)
+      out.writeLong(version);
   }
 
   @Override
@@ -78,7 +81,8 @@ public class HLogRecord implements LogRecord<HKey>, Writable, Comparable<HLogRec
     type = Type.values()[in.readInt()];
     key = new HKey();
     key.readFields(in);
-    version = in.readLong();
+    if (in.readBoolean())
+      version = in.readLong();
   }
 
 }

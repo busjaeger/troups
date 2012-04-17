@@ -4,107 +4,73 @@ import java.io.IOException;
 
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
-import org.apache.zookeeper.KeeperException;
 
 import edu.illinois.htx.client.Transaction;
-import edu.illinois.htx.regionserver.HRegionTransactionManagerProtocol;
+import edu.illinois.htx.regionserver.RTM;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 // TODO think about IOException during being/abort/commit
 public class LocalTransaction implements Transaction {
 
-  private final long id;
+  private HTable table;
+  private byte[] row;
+  private long id;
+  private boolean completed = false;
 
-  // TODO abstract out Zookeeper use
-  private final ZooKeeperWatcher zkw;
-  private final String node;
-  private final String eNode;
-
-  HTable hTable;
-  byte[] row;
-  boolean done;
-
-  LocalTransaction(long id, ZooKeeperWatcher zkw, String node, String eNode) {
-    this.id = id;
-    this.zkw = zkw;
-    this.node = node;
-    this.eNode = eNode;
-  }
-
-  @Override
-  public long getID() {
-    return id;
+  LocalTransaction() {
+    super();
   }
 
   /**
    * 
-   * @param hTable
+   * @param table
    * @param row
    * @return true if this is the first to enlist
+   * @throws IOException
    */
-  public void enlist(HTable table, byte[] row) {
-    if (done)
+  @Override
+  public long enlist(HTable table, byte[] row) throws IOException {
+    if (completed)
       throw new IllegalStateException("Already completed");
 
-    if (this.hTable == null) {
-      this.hTable = table;
+    if (this.table == null) {
+      // begin transaction
+      RTM rtm = table.coprocessorProxy(RTM.class, row);
+      this.id = rtm.begin();
+      this.table = table;
       this.row = row;
-      HRegionTransactionManagerProtocol tm = hTable.coprocessorProxy(
-          HRegionTransactionManagerProtocol.class, row);
-      try {
-        tm.begin(id);
-      } catch (IOException e) {
-        throw new RuntimeException("Failed to begin", e);
-      }
-    } else if (!Bytes.equals(this.hTable.getTableName(), table.getTableName())) {
+    } else if (!Bytes.equals(this.table.getTableName(), table.getTableName())) {
       throw new IllegalStateException("Local transaction cannot span tables");
-    } // TODO should we verify that row is in the same row group?
+    }
+    // TODO check row in same group if metadata present
+    return id;
   }
 
+  @Override
   public void rollback() {
-    if (done)
-      return;
-    if (hTable != null) {
-      HRegionTransactionManagerProtocol tm = hTable.coprocessorProxy(
-          HRegionTransactionManagerProtocol.class, row);
+    if (table != null) {
+      RTM rtm = table.coprocessorProxy(RTM.class, row);
       try {
-        tm.abort(id);
+        rtm.abort(id);
       } catch (IOException e) {
+        // TODO: should we just ignore this?
         throw new RuntimeException("Failed to rollback", e);
       }
     }
-    done();
+    completed = true;
   }
 
+  @Override
   public void commit() throws TransactionAbortedException {
-    if (hTable == null)
+    if (table == null)
       throw new IllegalStateException("No data to commit");
-    if (done)
-      return;
-    HRegionTransactionManagerProtocol tm = hTable.coprocessorProxy(
-        HRegionTransactionManagerProtocol.class, row);
+    RTM rtm = table.coprocessorProxy(RTM.class, row);
     try {
-      tm.commit(id);
+      rtm.commit(id);
     } catch (IOException e) {
       throw new RuntimeException("Failed to commit", e);
     }
-    done();
-  }
-
-  private void done() {
-    try {
-      try {
-        org.apache.hadoop.hbase.zookeeper.ZKUtil.deleteNode(zkw, eNode);
-      } catch (KeeperException.NoNodeException e) {
-        // shouldn't happen, but doesn't matter
-      }
-      org.apache.hadoop.hbase.zookeeper.ZKUtil.setData(zkw, node,
-          Bytes.toBytes(1));
-    } catch (KeeperException e) {
-      // TODO handle system errors
-    }
-    done = true;
+    completed = true;
   }
 
 }

@@ -11,9 +11,7 @@ import edu.illinois.htx.tm.TransactionAbortedException;
  */
 public interface Transaction {
 
-  public long getID();
-
-  public void enlist(HTable table, byte[] row) throws IOException;
+  public long enlist(HTable table, byte[] row) throws IOException;
 
   public void rollback();
 

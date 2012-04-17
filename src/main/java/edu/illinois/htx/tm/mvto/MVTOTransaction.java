@@ -4,9 +4,10 @@ import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.ABORTED;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.ACTIVE;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.BLOCKED;
 import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.COMMITTED;
+import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.CREATED;
+import static edu.illinois.htx.tm.mvto.MVTOTransaction.State.FINALIZED;
 
 import java.io.IOException;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -18,133 +19,101 @@ import java.util.Set;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyVersions;
+import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
-  public static enum State {
-    ACTIVE, BLOCKED, ABORTED, COMMITTED;
+  enum State {
+    CREATED, ACTIVE, BLOCKED, ABORTED, COMMITTED, FINALIZED;
   }
 
-  private final long id;
+  // immutable state
+  private final MVTOTransactionManager<K, ?> tm;
+
+  // mutable state
+  private long id;
   private State state;
-  private boolean finalized;
   private final Map<K, Long> reads;
   private final Map<K, Boolean> writes;
   private final Set<MVTOTransaction<K>> readFrom;
   private final Set<MVTOTransaction<K>> readBy;
-  private final MVTOTransactionManager<K, ?> tm;
 
-  public MVTOTransaction(long id, MVTOTransactionManager<K, ?> tm) {
-    this.id = id;
-    this.state = ACTIVE;
+  public MVTOTransaction(MVTOTransactionManager<K, ?> tm) throws IOException {
+    this.state = CREATED;
+    this.tm = tm;
     this.reads = new HashMap<K, Long>();
     this.writes = new HashMap<K, Boolean>();
     this.readFrom = new HashSet<MVTOTransaction<K>>(0);
     this.readBy = new HashSet<MVTOTransaction<K>>(0);
-    this.tm = tm;
   }
 
-  long getID() {
-    return this.id;
-  }
+  // ----------------------------------------------------------------------
+  // state transition methods
+  // ----------------------------------------------------------------------
 
-  public void begin() throws IOException {
-    tm.getLog().appendBegin(id);
-    state = ACTIVE;
-  }
-
-  synchronized void commit() throws TransactionAbortedException, IOException {
-    // check state
+  public synchronized void begin() throws IOException {
     switch (state) {
-    case ACTIVE:
+    case CREATED:
       break;
-    case BLOCKED:
-      throw new IllegalStateException("Transaction " + id + " commit pending");
     case ABORTED:
-      throw new IllegalStateException("Transaction " + id + " already aborted");
+    case ACTIVE:
+    case BLOCKED:
+    case COMMITTED:
+    case FINALIZED:
+      throw newISA("begin");
+    }
+    doBegin();
+  }
+
+  // being == get/set ID
+  protected void doBegin() throws IOException {
+    setID(tm.getTimestampManager().next());
+    tm.getLog().append(Type.BEGIN, id);
+    setState(ACTIVE);
+  }
+
+  public synchronized void commit() throws TransactionAbortedException,
+      IOException {
+    switch (state) {
     case COMMITTED:
       return;
+    case ACTIVE:
+      break;
+    case CREATED:
+    case BLOCKED:
+    case ABORTED:
+    case FINALIZED:
+      throw newISA("commit");
     }
+    doCommit();
+  }
 
-    // block until read-from transactions complete
-    while (!readFrom.isEmpty()) {
-      state = BLOCKED;
-      try {
-        // TODO add timeout
-        wait();
-      } catch (InterruptedException e) {
-        Thread.interrupted();
-      }
-      /*
-       * The following state changes can wake a blocked transaction: 1. the
-       * read-from transaction aborted and cascaded its abort 2. the read-from
-       * transaction committed 2. the transaction manager was shut down and
-       * interrupted the commit
-       */
-      if (state == ABORTED)
-        throw new TransactionAbortedException("Transaction " + id
-            + " is victim of cascading abort");
-      if (state == ACTIVE)
-        throw new IllegalStateException("Commit interrupted");
-    }
+  protected void doCommit() throws TransactionAbortedException, IOException {
+    waitUntilReadFromEmpty();
 
-    // record commit
-    tm.getLog().appendCommit(id);
-    state = COMMITTED;
+    tm.getLog().append(Type.COMMIT, id);
+    setState(COMMITTED);
+    tm.getTimestampManager().done(id);// TODO do this after finalize?
 
     /*
      * After a transaction commits, we still need to notify any waiting readers
      * and permanently remove deleted cells. We can do this on a separate
      * thread, since it is decoupled from the commit operation.
      */
-    // for now we do it synchronously, so we still hold region lock (since we
-    // assume no server crash ATM)
-    cleanupAfterCommit();
-  }
-
-  synchronized void unblock() {
-    if (state == BLOCKED) {
-      state = ACTIVE;
-      notify();
-    }
-  }
-
-  synchronized void abort() throws IOException {
-    switch (state) {
-    case ACTIVE:
-    case BLOCKED:
-      break;
-    case ABORTED:
-      return;
-    case COMMITTED:
-      throw new IllegalStateException("Transaction " + id
-          + " already committed");
-    }
-
-    tm.getLog().appendAbort(id);
-    if (state == BLOCKED)
-      notify();
-    state = ABORTED;
-
-    // This TA should no longer cause write conflicts, since it's aborted
-    removeReads();
-
-    // abort any transactions that read from this one and undo writes
-    cleanupAfterAbort();
+    // TODO do async if no need to hold region lock (think through recovery)
+    afterCommit();
   }
 
   // call with lock held
-  private void cleanupAfterCommit() throws IOException {
+  protected void afterCommit() throws IOException {
     /*
      * notify transactions that read from this one, that it committed (so they
      * don't wait on it): this has to be done after commit, since we don't want
      * to notify and then fail before commit.
      */
-    for (Iterator<MVTOTransaction<K>> it = readBy.iterator(); it.hasNext();) {
-      it.next().removeReadFrom(this);
-      it.remove();
-    }
+    removeReadBy();
+
     /*
      * permanently remove all rows deleted by this transaction
      */
@@ -165,11 +134,40 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       it.remove();
     }
     // logging once is sufficient, since delete operation idempotent
-    tm.getLog().appendFinalize(id);
-    finalized = true;
+    tm.getLog().append(Type.FINALIZE, id);
+    setState(FINALIZED);
   }
 
-  private void cleanupAfterAbort() throws IOException {
+  public synchronized void abort() throws IOException {
+    switch (state) {
+    case ACTIVE:
+    case BLOCKED:
+      break;
+    case ABORTED:
+      return;
+    case CREATED:
+    case COMMITTED:
+    case FINALIZED:
+      throw newISA("abort");
+    }
+    doAbort();
+  }
+
+  protected void doAbort() throws IOException {
+    tm.getLog().append(Type.ABORT, id);
+    if (state == BLOCKED)
+      notify();
+    setState(ABORTED);
+    tm.getTimestampManager().done(id);
+
+    // This TA should no longer cause write conflicts, since it's aborted
+    removeReads();
+
+    // abort any transactions that read from this one and undo writes
+    afterAbort();
+  }
+
+  protected void afterAbort() throws IOException {
     // we can forget who we read from: will never commit and therefore
     // never need to wait on the TAs we read from to complete
     readFrom.clear();
@@ -196,51 +194,21 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       it.remove();
     }
 
-    tm.getLog().appendFinalize(id);
-    finalized = true;
+    tm.getLog().append(Type.FINALIZE, id);
+    setState(FINALIZED);
   }
 
-  synchronized void setState(State state) {
-    this.state = state;
-  }
-
-  synchronized State getState() {
-    return state;
-  }
-
-  // TODO remove
-  synchronized void setFinalized() {
-    assert state == State.COMMITTED || state == State.ABORTED;
-    this.finalized = true;
-  }
-
-  synchronized boolean isFinalized() {
-    return finalized;
-  }
-
-  synchronized void addReadFrom(MVTOTransaction<K> ta) {
-    assert ta.state != COMMITTED;
-    readFrom.add(ta);
-  }
-
-  synchronized void removeReadFrom(MVTOTransaction<K> ta) {
-    assert ta.state == COMMITTED;
-    readFrom.remove(ta);
-    if (readFrom.isEmpty())
-      notify();
-  }
-
-  // TODO lock/unlock should be in finally blocks
-  synchronized void afterRead(Iterable<? extends KeyVersions<K>> kvs)
+  public synchronized void afterRead(Iterable<? extends KeyVersions<K>> kvs)
       throws IOException {
-    // check state
     switch (state) {
     case ACTIVE:
       break;
+    case CREATED:
     case ABORTED:
     case BLOCKED:
     case COMMITTED:
-      throw new IllegalStateException("Transaction in state " + state);
+    case FINALIZED:
+      throw newISA("read");
     }
 
     for (KeyVersions<K> kv : kvs) {
@@ -254,11 +222,13 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           if (writer != null) {
             synchronized (writer) {
               switch (writer.state) {
+              case CREATED:
+                throw new IllegalStateException();
               case ACTIVE:
               case BLOCKED:
                 // value not yet committed, add dependency in case writer aborts
-                writer.readBy.add(this);
-                this.readFrom.add(writer);
+                writer.addReadBy(this);
+                addReadFrom(writer);
                 // value deleted
                 if (writer.hasDeleted(key))
                   it.remove();
@@ -269,6 +239,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
                 it.remove();
                 continue;
               case COMMITTED:
+              case FINALIZED:
                 // value deleted, but not yet cleaned up
                 if (writer.hasDeleted(key))
                   it.remove();
@@ -295,7 +266,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           }
 
           // remember read for conflict detection
-          tm.getLog().appendRead(id, key, version);
+          tm.getLog().append(Type.READ, id, key, version);
           addRead(key, version);
           tm.addReader(key, version, this);
 
@@ -311,15 +282,17 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  synchronized void beforeWrite(boolean isDelete, Iterable<? extends K> keys)
-      throws IOException {
+  public synchronized void beforeWrite(boolean isDelete,
+      Iterable<? extends K> keys) throws IOException {
     switch (state) {
     case ACTIVE:
       break;
+    case CREATED:
     case ABORTED:
     case BLOCKED:
     case COMMITTED:
-      throw new IllegalStateException("Transaction in state " + state);
+    case FINALIZED:
+      throw newISA("read");
     }
 
     for (K key : keys) {
@@ -349,7 +322,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          * reads results and to delete values from the underlying data store
          * when the transaction commits
          */
-        tm.getLog().appendWrite(id, key, isDelete);
+        tm.getLog().append(isDelete ? Type.DELETE : Type.WRITE, id, key);
         addWrite(key, isDelete);
         /*
          * Add write in progress, so readers can check if they see the version
@@ -362,7 +335,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  synchronized void afterWrite(boolean isDelete, Iterable<? extends K> keys) {
+  public synchronized void afterWrite(boolean isDelete,
+      Iterable<? extends K> keys) {
     for (K key : keys) {
       tm.lock(key);
       try {
@@ -377,13 +351,90 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
+  // ----------------------------------------------------------------------
+  // getter/setters for transaction state
+  // used by state transitions methods and recovery process
+  // ----------------------------------------------------------------------
+
+  synchronized long getID() {
+    if (state == State.CREATED)
+      throw newISA("getID");
+    return this.id;
+  }
+
+  synchronized void setID(long id) {
+    this.id = id;
+  }
+
+  synchronized State getState() {
+    return state;
+  }
+
+  // used by recovery
+  synchronized void setState(State state) {
+    this.state = state;
+  }
+
+  // used by recovery
+  synchronized void addReadFrom(MVTOTransaction<K> ta) {
+    assert ta.state != COMMITTED;
+    readFrom.add(ta);
+  }
+
+  // blocks until read-from transactions complete
+  synchronized void waitUntilReadFromEmpty() throws IOException {
+    while (!readFrom.isEmpty()) {
+      setState(BLOCKED);
+      try {
+        // TODO add timeout
+        wait();
+      } catch (InterruptedException e) {
+        Thread.interrupted();
+      }
+      // we released the lock, so state may have changed
+      switch (state) {
+      case ABORTED:
+        // 1. the read-from transaction aborted and cascaded its abort
+        throw new TransactionAbortedException("Transaction " + id
+            + " is victim of cascading abort");
+      case ACTIVE:
+        // 2. the transaction manager was shut down and interrupted the commit
+        throw new IOException("Commit interrupted");// IOException means: retry
+      case BLOCKED:
+        break;
+      case COMMITTED:
+      case CREATED:
+      case FINALIZED:
+        // 3. we should never get into one of these states
+        throw newISA("doCommit");
+      }
+    }
+  }
+
+  synchronized void removeReadFrom(MVTOTransaction<K> ta) {
+    assert ta.state == COMMITTED;
+    readFrom.remove(ta);
+    if (readFrom.isEmpty())
+      notify();
+  }
+
+  synchronized void unblock() {
+    if (state == BLOCKED) {
+      setState(ACTIVE);
+      notifyAll();// notify should be enough, but be safe
+    }
+  }
+
   synchronized void addReadBy(MVTOTransaction<K> transaction) {
     assert this.state != State.COMMITTED;
     readBy.add(transaction);
   }
 
-  Collection<MVTOTransaction<K>> getReadBy() {
-    return readBy;
+  synchronized void removeReadBy() {
+    for (Iterator<MVTOTransaction<K>> it = readBy.iterator(); it.hasNext();) {
+      it.next().removeReadFrom(this);
+      it.remove();
+    }
   }
 
   synchronized void addRead(K key, long version) {
@@ -413,6 +464,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return Boolean.TRUE == writes.get(key);
   }
 
+  private IllegalStateException newISA(String op) {
+    return new IllegalStateException("Cannot " + op + " Transaction: " + this);
+  }
+
   @Override
   public int compareTo(MVTOTransaction<K> ta) {
     return Long.valueOf(id).compareTo(ta.id);
@@ -435,7 +490,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   @Override
   public String toString() {
-    return id + ":" + state + (finalized ? "(finalized)" : "");
+    return id + "(" + state + ")";
   }
 
 }

@@ -1,8 +1,8 @@
 package edu.illinois.htx.tm;
 
-import java.io.IOException;
+import org.apache.hadoop.hbase.DoNotRetryIOException;
 
-public class TransactionAbortedException extends IOException {
+public class TransactionAbortedException extends DoNotRetryIOException {
 
   private static final long serialVersionUID = -7646035544053931902L;
 
@@ -19,7 +19,7 @@ public class TransactionAbortedException extends IOException {
   }
 
   public TransactionAbortedException(Throwable cause) {
-    super(cause);
+    super(null, cause);
   }
 
 }

@@ -1,17 +1,28 @@
 package edu.illinois.htx.client.impl;
 
+import java.io.IOException;
+
+import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.util.Bytes;
 
 class RowGroup {
 
-  private final byte[] tableName;
+  private final HTable table;
   private final byte[] rootRow;
+
+  // pre-computed
+  private final byte[] tableName;
   private final int hashCode;
 
-  public RowGroup(byte[] tableName, byte[] rootRow) {
-    this.tableName = tableName;
+  public RowGroup(HTable table, byte[] rootRow) throws IOException {
+    this.table = table;
     this.rootRow = rootRow;
+    this.tableName = table.getTableDescriptor().getName();
     this.hashCode = Bytes.hashCode(tableName) ^ Bytes.hashCode(rootRow);
+  }
+
+  public HTable getTable() {
+    return table;
   }
 
   public byte[] getTableName() {

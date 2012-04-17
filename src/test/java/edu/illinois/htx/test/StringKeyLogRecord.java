@@ -8,10 +8,10 @@ public class StringKeyLogRecord implements LogRecord<StringKey> {
   private final long tid;
   private final Type type;
   private final StringKey key;
-  private final long version;
+  private final Long version;
 
   public StringKeyLogRecord(long sid, long tid, Type type, StringKey key,
-      long version) {
+      Long version) {
     this.sid = sid;
     this.tid = tid;
     this.type = type;

@@ -1,4 +1,4 @@
-package edu.illinois.htx.client.impl;
+package edu.illinois.htx.tsm;
 
 import java.io.DataInput;
 import java.io.DataOutput;
@@ -10,19 +10,29 @@ import java.util.TreeMap;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.Writable;
 
-public class TransactionState implements Writable {
+public class TimestampState implements Writable {
 
   private boolean done = false;
-  private Map<Integer, Boolean> votes;
+  private Map<Long, Boolean> votes;
 
-  public TransactionState() {
+  public TimestampState() {
   }
 
-  public TransactionState(boolean done) {
+  public TimestampState(byte[] bytes) {
+    DataInputBuffer in = new DataInputBuffer();
+    in.reset(bytes, bytes.length);
+    try {
+      readFields(in);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  public TimestampState(boolean done) {
     this(done, null);
   }
 
-  public TransactionState(boolean done, Map<Integer, Boolean> votes) {
+  public TimestampState(boolean done, Map<Long, Boolean> votes) {
     this.done = done;
     this.votes = votes;
   }
@@ -35,11 +45,20 @@ public class TransactionState implements Writable {
     return done;
   }
 
-  public void setVotes(Map<Integer, Boolean> votes) {
+  public boolean hasActiveParticipants() {
+    if (votes == null)
+      return false;
+    for (Boolean vote: votes.values())
+      if (!vote)
+        return true;
+    return false;
+  }
+
+  public void setVotes(Map<Long, Boolean> votes) {
     this.votes = votes;
   }
 
-  public Map<Integer, Boolean> getVotes() {
+  public Map<Long, Boolean> getVotes() {
     return votes;
   }
 
@@ -48,8 +67,8 @@ public class TransactionState implements Writable {
     out.writeBoolean(done);
     out.writeInt(votes == null ? -1 : votes.size());
     if (votes != null) {
-      for (Entry<Integer, Boolean> entry : votes.entrySet()) {
-        out.writeInt(entry.getKey());
+      for (Entry<Long, Boolean> entry : votes.entrySet()) {
+        out.writeLong(entry.getKey());
         out.writeBoolean(entry.getValue());
       }
     }
@@ -60,22 +79,13 @@ public class TransactionState implements Writable {
     done = in.readBoolean();
     int size = in.readInt();
     if (size > -1) {
-      votes = new TreeMap<Integer, Boolean>();
+      votes = new TreeMap<Long, Boolean>();
       for (int i = 0; i < size; i++) {
-        int part = in.readInt();
+        long part = in.readLong();
         boolean partDone = in.readBoolean();
         votes.put(part, partDone);
       }
     }
   }
 
-  public void readFields(byte[] bytes) {
-    DataInputBuffer in = new DataInputBuffer();
-    in.reset(bytes, bytes.length);
-    try {
-      readFields(in);
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
-  }
 }

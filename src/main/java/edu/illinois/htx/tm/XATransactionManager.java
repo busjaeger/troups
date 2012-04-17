@@ -2,11 +2,13 @@ package edu.illinois.htx.tm;
 
 import java.io.IOException;
 
-public interface TransactionManager {
+public interface XATransactionManager {
 
   public static final long VERSION = 1L;
 
-  long begin() throws IOException;
+  long join(long tid) throws IOException;
+
+  void prepare(long tid) throws IOException;
 
   void commit(long tid) throws TransactionAbortedException, IOException;
 

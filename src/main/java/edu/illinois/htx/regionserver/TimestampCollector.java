@@ -27,8 +27,9 @@ import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
-import edu.illinois.htx.tm.TimestampListener;
-import edu.illinois.htx.util.ZKUtil;
+import edu.illinois.htx.tsm.TimestampListener;
+import edu.illinois.htx.tsm.TimestampState;
+import edu.illinois.htx.tsm.zk.ZKUtil;
 
 public class TimestampCollector extends ZooKeeperListener implements Runnable {
 
@@ -58,7 +59,7 @@ public class TimestampCollector extends ZooKeeperListener implements Runnable {
         DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS);
     String collectorsNode = ZKUtil.joinZNode(getHTXZNode(), collectors);
     String collectorsDir = ZKUtil.appendSeparator(collectorsNode);
-    zNode = ZKUtil.createSequentialWithParents(watcher, collectorsDir,
+    zNode = ZKUtil.createWithParents(watcher, collectorsDir,
         CreateMode.EPHEMERAL_SEQUENTIAL);
     tryToBecomeCollector();
     nodeDataChanged(getOATZNode());// get initial OAT
@@ -117,7 +118,7 @@ public class TimestampCollector extends ZooKeeperListener implements Runnable {
       try {
         long oat = getOAT();
         for (TimestampListener listener : listeners)
-          listener.oldestTimestampChanged(oat);
+          listener.deleted(oat);
       } catch (IOException e) {
         e.printStackTrace();
         System.err.println("Failed to retrieve OAT");
@@ -148,9 +149,11 @@ public class TimestampCollector extends ZooKeeperListener implements Runnable {
             System.err.println("node " + child + " disappeared");
             continue;
           }
-          if (data.length == 0) {
-            if (!ZKUtil.getChildren(watcher, child).isEmpty()) {
-              // transaction is active
+          TimestampState state = new TimestampState(data);
+          if (!state.isDone()) {
+            String owner = ZKUtil.joinZNode(child, "owner");
+            if (ZKUtil.exists(watcher, owner) || state.hasActiveParticipants()) {
+              // timestamp is still in use
               oat = tid;
               break;
             }
