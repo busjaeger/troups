@@ -24,9 +24,9 @@ public interface HTXConstants {
 
   public static final String DEFAULT_TM_LOG_TABLE_FAMILY_NAME = "log";
 
-  public static final String TM_GC_INTERVAL = "htx.tm.gc.interval";
+  public static final String TM_TSC_INTERVAL = "htx.tm.tsc.interval";
 
-  public static final long DEFAULT_TM_GC_INTERVAL = 5000l;
+  public static final long DEFAULT_TM_TSC_INTERVAL = 5000l;
 
   public static final String ZOOKEEPER_ZNODE_BASE = "zookeeper.znode.base";
 
@@ -40,8 +40,8 @@ public interface HTXConstants {
 
   public static final String DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS = "collectors";
 
-  public static final String ZOOKEEPER_ZNODE_OAT = "zookeeper.znode.oldest-active-timestamp";
+  public static final String ZOOKEEPER_ZNODE_LDT = "zookeeper.znode.ldt";
 
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_OAT = "oat";
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_LDT = "ldt";
 
 }

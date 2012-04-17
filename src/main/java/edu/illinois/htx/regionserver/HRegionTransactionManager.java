@@ -42,7 +42,7 @@ import edu.illinois.htx.HTXConstants;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
-import edu.illinois.htx.tsm.TimestampListener;
+import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
 /**
  * TODO (in order of priority):
@@ -215,7 +215,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void deleted(long timestamp) {
+  public void lastDeletedTimestampChanged(long timestamp) {
     oldestTimestamp = timestamp;
   }
 

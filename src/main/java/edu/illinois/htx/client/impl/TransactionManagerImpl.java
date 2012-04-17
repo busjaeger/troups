@@ -29,7 +29,7 @@ public class TransactionManagerImpl extends TransactionManager {
   }
 
   public Transaction beginXG() {
-    DistributedTransaction tran = new DistributedTransaction(xaTsm);
+    XGTransaction tran = new XGTransaction(xaTsm);
     try {
       tran.begin();
     } catch (IOException e) {

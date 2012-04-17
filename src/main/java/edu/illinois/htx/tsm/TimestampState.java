@@ -32,6 +32,12 @@ public class TimestampState implements Writable {
     this(done, null);
   }
 
+  public TimestampState(Iterable<Long> pids) {
+    this.votes = new TreeMap<Long, Boolean>();
+    for (Long pid : pids)
+      votes.put(pid, false);
+  }
+
   public TimestampState(boolean done, Map<Long, Boolean> votes) {
     this.done = done;
     this.votes = votes;
@@ -48,7 +54,7 @@ public class TimestampState implements Writable {
   public boolean hasActiveParticipants() {
     if (votes == null)
       return false;
-    for (Boolean vote: votes.values())
+    for (Boolean vote : votes.values())
       if (!vote)
         return true;
     return false;
@@ -60,6 +66,10 @@ public class TimestampState implements Writable {
 
   public Map<Long, Boolean> getVotes() {
     return votes;
+  }
+
+  public Map<Long, Boolean> getOrCreateVotes() {
+    return votes == null ? votes = new TreeMap<Long, Boolean>() : votes;
   }
 
   @Override

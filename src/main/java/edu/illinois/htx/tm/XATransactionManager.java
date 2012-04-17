@@ -8,9 +8,9 @@ public interface XATransactionManager {
 
   long join(long tid) throws IOException;
 
-  void prepare(long tid) throws IOException;
+  void prepare(long tid) throws TransactionAbortedException, IOException;
 
-  void commit(long tid) throws TransactionAbortedException, IOException;
+  void commit(long tid) throws IOException;
 
   void abort(long tid) throws IOException;
 

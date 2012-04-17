@@ -28,8 +28,8 @@ import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.TransactionManager;
 import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
-import edu.illinois.htx.tsm.TimestampListener;
 import edu.illinois.htx.tsm.TimestampManager;
+import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
 /**
  * Note: this class (and all other classes in this package) do not depend on
@@ -140,7 +140,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
       if (running)
         return;
       recover();
-      timestampManager.addTimestampListener(this);
+      timestampManager.addLastDeletedTimestampListener(this);
       running = true;
     } finally {
       runLock.writeLock().unlock();

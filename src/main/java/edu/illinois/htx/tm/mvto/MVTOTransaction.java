@@ -94,7 +94,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
     tm.getLog().append(Type.COMMIT, id);
     setState(COMMITTED);
-    tm.getTimestampManager().done(id);// TODO do this after finalize?
 
     /*
      * After a transaction commits, we still need to notify any waiting readers
@@ -136,6 +135,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     // logging once is sufficient, since delete operation idempotent
     tm.getLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
+    tm.getTimestampManager().done(id);
   }
 
   public synchronized void abort() throws IOException {
@@ -158,7 +158,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     if (state == BLOCKED)
       notify();
     setState(ABORTED);
-    tm.getTimestampManager().done(id);
 
     // This TA should no longer cause write conflicts, since it's aborted
     removeReads();
@@ -196,6 +195,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
     tm.getLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
+    tm.getTimestampManager().done(id);
   }
 
   public synchronized void afterRead(Iterable<? extends KeyVersions<K>> kvs)

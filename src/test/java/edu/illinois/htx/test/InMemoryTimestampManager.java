@@ -10,7 +10,7 @@ import edu.illinois.htx.tsm.TimestampManager;
 
 public class InMemoryTimestampManager implements TimestampManager {
 
-  private final List<TimestampListener> listeners = new CopyOnWriteArrayList<TimestampListener>();
+  private final List<CompletionListener> listeners = new CopyOnWriteArrayList<CompletionListener>();
 
   private NavigableMap<Long, Boolean> timestamps = new TreeMap<Long, Boolean>();
   private long lastActive = 0;
@@ -35,8 +35,8 @@ public class InMemoryTimestampManager implements TimestampManager {
           return;
     lastDeleted = ts;
     timestamps = new TreeMap<Long, Boolean>(timestamps.tailMap(ts, false));
-    for (TimestampListener listener : listeners)
-      listener.deleted(ts);
+    for (CompletionListener listener : listeners)
+      listener.lastDeletedTimestampChanged(ts);
   }
 
   @Override
@@ -45,7 +45,7 @@ public class InMemoryTimestampManager implements TimestampManager {
   }
 
   @Override
-  public void addTimestampListener(TimestampListener listener) {
+  public void addDeleteListener(CompletionListener listener) {
     listeners.add(listener);
   }
 
