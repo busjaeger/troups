@@ -29,11 +29,11 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   // immutable state
-  private final MVTOTransactionManager<K, ?> tm;
+  protected final MVTOTransactionManager<K, ?> tm;
 
   // mutable state
-  private long id;
-  private State state;
+  protected long id;
+  protected State state;
   private final Map<K, Long> reads;
   private final Map<K, Boolean> writes;
   private final Set<MVTOTransaction<K>> readFrom;
@@ -69,7 +69,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   // being == get/set ID
   protected void doBegin() throws IOException {
     setID(tm.getTimestampManager().next());
-    tm.getLog().append(Type.BEGIN, id);
+    tm.getTransactionLog().append(Type.BEGIN, id);
     setState(ACTIVE);
   }
 
@@ -92,7 +92,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   protected void doCommit() throws TransactionAbortedException, IOException {
     waitUntilReadFromEmpty();
 
-    tm.getLog().append(Type.COMMIT, id);
+    tm.getTransactionLog().append(Type.COMMIT, id);
     setState(COMMITTED);
 
     /*
@@ -133,7 +133,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       it.remove();
     }
     // logging once is sufficient, since delete operation idempotent
-    tm.getLog().append(Type.FINALIZE, id);
+    tm.getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
     tm.getTimestampManager().done(id);
   }
@@ -154,7 +154,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   protected void doAbort() throws IOException {
-    tm.getLog().append(Type.ABORT, id);
+    tm.getTransactionLog().append(Type.ABORT, id);
     if (state == BLOCKED)
       notify();
     setState(ABORTED);
@@ -193,7 +193,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       it.remove();
     }
 
-    tm.getLog().append(Type.FINALIZE, id);
+    tm.getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
     tm.getTimestampManager().done(id);
   }
@@ -266,7 +266,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           }
 
           // remember read for conflict detection
-          tm.getLog().append(Type.READ, id, key, version);
+          tm.getTransactionLog().append(Type.READ, id, key, version);
           addRead(key, version);
           tm.addReader(key, version, this);
 
@@ -322,7 +322,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          * reads results and to delete values from the underlying data store
          * when the transaction commits
          */
-        tm.getLog().append(isDelete ? Type.DELETE : Type.WRITE, id, key);
+        tm.getTransactionLog().append(isDelete ? Type.DELETE : Type.WRITE, id, key);
         addWrite(key, isDelete);
         /*
          * Add write in progress, so readers can check if they see the version
@@ -464,7 +464,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return Boolean.TRUE == writes.get(key);
   }
 
-  private IllegalStateException newISA(String op) {
+  IllegalStateException newISA(String op) {
     return new IllegalStateException("Cannot " + op + " Transaction: " + this);
   }
 

@@ -1,4 +1,4 @@
-package edu.illinois.htx.regionserver;
+package edu.illinois.htx.tsm.zk;
 
 import static edu.illinois.htx.HTXConstants.DEFAULT_TM_TSC_INTERVAL;
 import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
@@ -6,6 +6,9 @@ import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS;
 import static edu.illinois.htx.HTXConstants.TM_TSC_INTERVAL;
 import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_COLLECTORS;
+import static edu.illinois.htx.tsm.zk.Util.join;
+import static edu.illinois.htx.tsm.zk.Util.setWatch;
+import static edu.illinois.htx.tsm.zk.Util.toDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -34,7 +37,7 @@ public class TimestampCollector implements Runnable {
   private final ZooKeeperWatcher zkw;
   private final ScheduledExecutorService pool;
   private final long interval;
-  private final String collectorsDir;
+  private final String collectorsNode;
 
   private String zNode;
   private boolean ldtSet;
@@ -48,13 +51,13 @@ public class TimestampCollector implements Runnable {
     String htx = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
     String collectors = conf.get(ZOOKEEPER_ZNODE_COLLECTORS,
         DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS);
-    this.collectorsDir = zkw.baseZNode + '/' + htx + '/' + collectors + '/';
+    this.collectorsNode = join(zkw.baseZNode, htx, collectors);
     this.interval = conf.getLong(TM_TSC_INTERVAL, DEFAULT_TM_TSC_INTERVAL);
   }
-
-  void start() throws IOException {
+ 
+  public void start() throws IOException {
     try {
-      zNode = createWithParents(collectorsDir, new byte[0],
+      zNode = createWithParents(toDir(collectorsNode), new byte[0],
           CreateMode.EPHEMERAL_SEQUENTIAL);
     } catch (KeeperException e) {
       throw new IOException(e);
@@ -85,36 +88,42 @@ public class TimestampCollector implements Runnable {
   }
 
   private boolean becomeCollector() throws IOException {
-    List<String> children = ZKUtil.listChildrenNoWatch(zkw,
-        ZKUtil.getParent(zNode));
-    String preceeding = null;
-    // loop until we are the leader or we follow someone
-    while (true) {
-      for (String child : children)
-        if (child.compareTo(zNode) < 0)
-          if (preceeding == null || preceeding.compareTo(child) < 0)
-            preceeding = child;
-      // this is the leader
-      if (preceeding == null)
-        return true;
-      if (ZKUtil.setWatch(zkw, preceeding, new Watcher() {
-        @Override
-        public void process(WatchedEvent event) {
-          switch (event.getType()) {
-          case NodeDeleted:
-            try {
-              tryToBecomeCollector();
-            } catch (IOException e) {
-              e.printStackTrace();
-              // TODO remove ephemeral node, retry etc.
+    try {
+      List<String> children = ZKUtil.listChildrenNoWatch(zkw, collectorsNode);
+      String preceeding = null;
+      // loop until we are the leader or we follow someone
+      while (true) {
+        for (String child : children)
+          if (child.compareTo(zNode) < 0)
+            if (preceeding == null || preceeding.compareTo(child) < 0)
+              preceeding = child;
+        // this is the leader
+        if (preceeding == null)
+          return true;
+        if (setWatch(zkw, preceeding, new Watcher() {
+          @Override
+          public void process(WatchedEvent event) {
+            switch (event.getType()) {
+            case NodeDeleted:
+              try {
+                tryToBecomeCollector();
+              } catch (IOException e) {
+                e.printStackTrace();
+                // TODO remove ephemeral node, retry etc.
+              }
+              break;
+            default:
+              break;
             }
-            break;
-          default:
-            break;
           }
-        }
-      }))
-        break;
+        }))
+          break;
+      }
+    } catch (KeeperException e) {
+      throw new IOException(e);
+    } catch (InterruptedException e) {
+      Thread.interrupted();
+      throw new IOException(e);
     }
     return false;
   }

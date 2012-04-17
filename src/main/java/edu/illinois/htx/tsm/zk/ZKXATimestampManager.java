@@ -1,6 +1,9 @@
 package edu.illinois.htx.tsm.zk;
 
 import static edu.illinois.htx.tsm.ParticipantState.ACTIVE;
+import static edu.illinois.htx.tsm.zk.Util.createWithParents;
+import static edu.illinois.htx.tsm.zk.Util.getId;
+import static edu.illinois.htx.tsm.zk.Util.setWatch;
 import static org.apache.zookeeper.CreateMode.EPHEMERAL_SEQUENTIAL;
 
 import java.io.IOException;
@@ -33,18 +36,26 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
   public boolean isDone(long ts) throws NoSuchTimestampException, IOException {
     TimestampState state = getState(ts);
     if (!state.isDone()) {
-      
-      
+      String owner = getOwnerNode("owner");
+      try {
+        if (ZKUtil.checkExists(watcher, owner) != -1
+            || state.hasActiveParticipants()) {
+          return false;
+        }
+      } catch (KeeperException e) {
+        throw new IOException(e);
+      }
     }
     return true;
   }
 
   @Override
   public long join(long ts) throws IOException {
-    String tranDir = join(transNode, ts, "");
+    String tranDir = Util.join(transNode, ts, "");
     byte[] state = Bytes.toBytes(ACTIVE.toString());
     try {
-      String partNode = createWithParents(tranDir, state, EPHEMERAL_SEQUENTIAL);
+      String partNode = createWithParents(watcher, tranDir, state,
+          EPHEMERAL_SEQUENTIAL);
       return getId(partNode);
     } catch (KeeperException e) {
       throw new IOException(e);
@@ -59,9 +70,9 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
   }
 
   public void disconnect(long ts, long pid) throws IOException {
-    String partNode = join(transNode, ts, pid);
+    String partNode = Util.join(transNode, ts, pid);
     try {
-      ZKUtil.deleteNode(zkw, partNode);
+      ZKUtil.deleteNode(watcher, partNode);
     } catch (KeeperException.NoNodeException e) {
       // ignore
     } catch (KeeperException e) {
@@ -100,10 +111,10 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
 
   public void setParticipantState(long ts, long pid, ParticipantState state)
       throws IOException {
-    String partNode = join(transNode, ts, pid);
+    String partNode = Util.join(transNode, ts, pid);
     byte[] data = Bytes.toBytes(state.toString());
     try {
-      ZKUtil.setData(zkw, partNode, data);
+      ZKUtil.setData(watcher, partNode, data);
     } catch (KeeperException e) {
       throw new IOException(e);
     }
@@ -111,7 +122,7 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
 
   ParticipantState getParticipantState(String partNode) throws IOException {
     try {
-      byte[] data = ZKUtil.getData(zkw, partNode);
+      byte[] data = ZKUtil.getData(watcher, partNode);
       return ParticipantState.valueOf(Bytes.toString(data));
     } catch (KeeperException e) {
       throw new IOException(e);
@@ -121,10 +132,10 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
   @Override
   public void setState(long tid, TimestampState state, Version version)
       throws VersionMismatchException, IOException {
-    String tranNode = join(transNode, tid);
+    String tranNode = Util.join(transNode, tid);
     byte[] data = WritableUtils.toByteArray(state);
     try {
-      ZKUtil.setData(zkw, tranNode, data, version.getVersion());
+      ZKUtil.setData(watcher, tranNode, data, version.getVersion());
     } catch (KeeperException.BadVersionException e) {
       throw new VersionMismatchException(e);
     } catch (NoNodeException e) {
@@ -136,11 +147,11 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
 
   @Override
   public TimestampState getState(long tid, Version version) throws IOException {
-    String tranNode = join(transNode, tid);
+    String tranNode = Util.join(transNode, tid);
     Stat stat = new Stat();
     byte[] data;
     try {
-      data = ZKUtil.getDataAndWatch(zkw, tranNode, stat);
+      data = ZKUtil.getDataAndWatch(watcher, tranNode, stat);
     } catch (KeeperException.NoNodeException e) {
       throw new NoSuchTimestampException(e);
     } catch (KeeperException e) {
@@ -153,25 +164,14 @@ public class ZKXATimestampManager extends ZKTimestampManager implements
   @Override
   public boolean addParticipantListener(long ts, long pid,
       ParticipantListener listener) throws IOException {
-    String partNode = join(transNode, ts, pid);
+    String partNode = Util.join(transNode, ts, pid);
     try {
-      return setWatch(partNode, new ParticipantWatcher(listener, pid));
+      return setWatch(watcher, partNode, new ParticipantWatcher(listener, pid));
     } catch (KeeperException e) {
       throw new IOException(e);
     } catch (InterruptedException e) {
       Thread.interrupted();
       throw new IOException(e);
-    }
-  }
-
-  protected boolean setWatch(String znode, Watcher watcher)
-      throws KeeperException, InterruptedException {
-    try {
-      ZKUtil.waitForZKConnectionIfAuthenticating(zkw);
-      zkw.getRecoverableZooKeeper().getData(znode, watcher, null);
-      return true;
-    } catch (KeeperException.NoNodeException e) {
-      return false;
     }
   }
 

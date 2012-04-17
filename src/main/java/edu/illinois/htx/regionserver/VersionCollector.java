@@ -10,11 +10,11 @@ import org.apache.hadoop.hbase.regionserver.InternalScanner;
 public class VersionCollector implements InternalScanner {
 
   private final InternalScanner internalScanner;
-  private final long oldestTimestamp;
+  private final long ldt;
 
-  public VersionCollector(InternalScanner internalScanner, long oldestTimestamp) {
+  public VersionCollector(InternalScanner internalScanner, long ldt) {
     this.internalScanner = internalScanner;
-    this.oldestTimestamp = oldestTimestamp;
+    this.ldt = ldt;
   }
 
   @Override

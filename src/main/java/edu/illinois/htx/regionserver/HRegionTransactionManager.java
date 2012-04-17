@@ -41,8 +41,10 @@ import com.google.common.collect.Iterables;
 import edu.illinois.htx.HTXConstants;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tm.mvto.MVTOTransactionManager;
+import edu.illinois.htx.tm.mvto.XAMVTOTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
+import edu.illinois.htx.tsm.zk.TimestampCollector;
+import edu.illinois.htx.tsm.zk.ZKXATimestampManager;
 
 /**
  * TODO (in order of priority):
@@ -60,19 +62,26 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
 
-  private MVTOTransactionManager<HKey, HLogRecord> tm;
+  private XAMVTOTransactionManager<HKey, HLogRecord> tm;
+  private ZKXATimestampManager tsm;
   private ScheduledExecutorService pool;
   private TimestampCollector collector;
-  private volatile long oldestTimestamp;
+  private volatile long ldt;
 
+  // TODO think about startup/ownership
   @Override
   public void start(CoprocessorEnvironment e) throws IOException {
     RegionCoprocessorEnvironment env = ((RegionCoprocessorEnvironment) e);
     Configuration conf = env.getConfiguration();
+    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
 
     // create thread pool
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
     pool = Executors.newScheduledThreadPool(count);
+
+    // start time-stamp manager
+    ZKXATimestampManager tsm = new ZKXATimestampManager(zkw);
+    tsm.start();
 
     // create transaction manager
     HRegion region = env.getRegion();
@@ -81,17 +90,16 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     HConnection connection = env.getRegionServerServices().getCatalogTracker()
         .getConnection();
     HRegionLog tlog = HRegionLog.newInstance(connection, pool, regionInfo);
-    tm = new MVTOTransactionManager<HKey, HLogRecord>(kvs, tlog);
+    tm = new XAMVTOTransactionManager<HKey, HLogRecord>(kvs, tlog, tsm);
 
     // create timestamp collector
-    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
-    collector = new TimestampCollector(conf, pool, zkw);
-    collector.addListener(this);
-    collector.addListener(tm);
+    collector = new TimestampCollector(tsm, conf, pool, zkw);
   }
 
   @Override
   public void preOpen(ObserverContext<RegionCoprocessorEnvironment> ctx) {
+    tsm.addLastDeletedTimestampListener(this);
+    tsm.start();
     try {
       // 1. start transaction manager
       tm.start();
@@ -107,7 +115,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void postClose(ObserverContext<RegionCoprocessorEnvironment> e,
       boolean abortRequested) {
-    tm.stop();
+    tm.stop(abortRequested);
   }
 
   @Override
@@ -172,13 +180,13 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (e.getEnvironment().getRegion().getRegionInfo().isMetaTable()) {
       return scanner;
     } else {
-      return new VersionCollector(scanner, oldestTimestamp);
+      return new VersionCollector(scanner, ldt);
     }
   }
 
   @Override
-  public void join(long tid) throws IOException {
-    tm.join(tid);
+  public long begin() throws IOException {
+    return 0;
   }
 
   @Override
@@ -215,8 +223,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void lastDeletedTimestampChanged(long timestamp) {
-    oldestTimestamp = timestamp;
+  public void deleted(long timestamp) {
+    ldt = timestamp;
   }
 
   private static Long getTID(OperationWithAttributes operation) {
@@ -346,4 +354,5 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
           }
         }));
   }
+
 }

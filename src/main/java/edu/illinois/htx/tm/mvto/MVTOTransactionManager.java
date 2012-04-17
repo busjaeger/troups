@@ -94,9 +94,9 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   // key value store this TM is governing
   private final KeyValueStore<K> keyValueStore;
   // transaction log
-  private final Log<K, R> log;
+  private final Log<K, R> transactionLog;
   // timestamp oracle
-  private final TimestampManager timestampManager;
+  protected final TimestampManager timestampManager;
 
   // mutable state
   // transactions by transaction ID for efficient direct lookup
@@ -108,14 +108,14 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   // lock protect the previous two conflict detection data structures
   private final ConcurrentMap<Key, Lock> keyLocks = new ConcurrentHashMap<Key, Lock>();
   // flag to indicate whether this TM is running
-  private boolean running;
+  protected boolean running;
   // guards the running flag
-  private ReadWriteLock runLock = new ReentrantReadWriteLock();
+  protected ReadWriteLock runLock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore, Log<K, R> log,
       TimestampManager timestampManager) {
     this.keyValueStore = keyValueStore;
-    this.log = log;
+    this.transactionLog = log;
     this.timestampManager = timestampManager;
     this.transactions = new TreeMap<Long, MVTOTransaction<K>>();
     this.readers = new HashMap<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
@@ -126,8 +126,8 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     return keyValueStore;
   }
 
-  public Log<K, R> getLog() {
-    return log;
+  public Log<K, R> getTransactionLog() {
+    return transactionLog;
   }
 
   public TimestampManager getTimestampManager() {
@@ -462,7 +462,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
    */
   // TODO think through recovery
   private void recover() throws IOException {
-    for (LogRecord<K> record : log.recover()) {
+    for (LogRecord<K> record : transactionLog.recover()) {
       long tid = record.getTID();
       // ignore transactions that began before the log save-point
       MVTOTransaction<K> ta = transactions.get(tid);
