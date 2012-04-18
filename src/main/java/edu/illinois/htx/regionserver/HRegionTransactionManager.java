@@ -49,16 +49,6 @@ import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
 import edu.illinois.htx.tsm.zk.TimestampReclaimer;
 import edu.illinois.htx.tsm.zk.ZKSharedTimestampManager;
 
-/**
- * TODO (in order of priority):
- * <ol>
- * <li>Implement internal scanner to delete unused versions during compaction
- * <li>orderly server shutdown
- * <li>recover from server crashes
- * <li>support regions splits
- * <li>add distributed transactions
- * </ol>
- */
 public class HRegionTransactionManager extends BaseRegionObserver implements
     RTM, TimestampReclamationListener, KeyValueStore<HKey> {
 

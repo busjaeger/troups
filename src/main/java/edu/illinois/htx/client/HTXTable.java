@@ -18,7 +18,7 @@ public class HTXTable implements Closeable {
   final HTable hTable;
 
   public HTXTable(Configuration conf, byte[] tableName) throws IOException {
-    this.hTable = new HTable(conf, tableName); // TODO lookup mapping
+    this.hTable = new HTable(conf, tableName);
   }
 
   public HTXTable(Configuration conf, String tableName) throws IOException {
@@ -59,7 +59,6 @@ public class HTXTable implements Closeable {
   public void delete(Transaction ta, Delete delete) throws IOException {
     org.apache.hadoop.hbase.client.Put hPut = createTransactionPut(delete, ta);
     hPut.setAttribute(HTXConstants.ATTR_NAME_DEL, Bytes.toBytes(true));
-    // TODO: support other types of deletes (columns, family)
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);

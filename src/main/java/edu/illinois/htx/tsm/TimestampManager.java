@@ -1,8 +1,9 @@
 package edu.illinois.htx.tsm;
 
 import java.io.IOException;
+import java.util.Comparator;
 
-public interface TimestampManager {
+public interface TimestampManager extends Comparator<Long> {
 
   public interface TimestampListener {
     void deleted(long ts);

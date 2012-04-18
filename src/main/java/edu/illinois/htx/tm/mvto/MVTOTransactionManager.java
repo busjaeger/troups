@@ -78,12 +78,17 @@ import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
  * 
  * TODO (in order of priority):
  * <ol>
- * <li>think through crash recovery
- * 
  * <li>remove implementation assumptions (see above)
  * 
  * <li>support alternate policy to only read committed versions (to eliminate
  * cascading aborts)
+ * 
+ * <li>think about consequences of IOExceptions
+ * <li>think about if there is a way to do finalize asynchronously
+ * <li>think about reading (1) conflicting write in progress and (2) delete from
+ * removed finalized transactions
+ * <li>refactor to clearly separate: local transaction processing, distributed
+ * transactions processing, and concurrency control policy
  * 
  * </ol>
  */
@@ -173,8 +178,6 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
 
   @Override
   public void beforeRead(long tid, Iterable<? extends K> keys) {
-    // TODO need to keep finalized transactions around until all readers
-    // that started before they were finalized have completed
   }
 
   /**
@@ -433,7 +436,6 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
         try {
           ta.abort();
         } catch (IOException e) {
-          // TODO
           e.printStackTrace();
         }
         if (ta.getState() == State.FINALIZED)
@@ -459,8 +461,6 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
    * 
    * @throws IOException
    */
-  // TODO think through recovery
-  // TODO factor out 'JOIN' and 'PREPARED' properly
   private void recover() throws IOException {
     for (LogRecord<K> record : transactionLog.recover()) {
       long tid = record.getTID();

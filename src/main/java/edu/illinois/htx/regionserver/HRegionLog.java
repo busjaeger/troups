@@ -128,7 +128,6 @@ public class HRegionLog extends Log<HKey, HLogRecord> {
   /*
    * any better way to do this?? It seems there is no 'delete' scanner API.
    */
-  // TODO set save-point, delete later?
   @Override
   public void savepoint(long sid) throws IOException {
     Scan scan = createScan();

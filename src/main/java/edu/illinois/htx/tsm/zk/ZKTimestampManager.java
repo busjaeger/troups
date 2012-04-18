@@ -166,7 +166,6 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     return Iterables.transform(children, new Function<String, Long>() {
       @Override
       public Long apply(String path) {
-        // TODO ZK generates integers
         return Long.parseLong(ZKUtil.getNodeName(path));
       }
     });
@@ -212,6 +211,12 @@ public class ZKTimestampManager extends ZooKeeperListener implements
         System.out.println("Listener failed: " + listener);
         t.printStackTrace();
       }
+  }
+
+  // TODO handle overflow
+  @Override
+  public int compare(Long o1, Long o2) {
+    return o1.compareTo(o2);
   }
 
 }

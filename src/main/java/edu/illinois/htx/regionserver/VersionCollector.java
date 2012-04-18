@@ -6,7 +6,7 @@ import java.util.List;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
 
-// TODO delete old versions
+// TODO delete unused versions during compact
 public class VersionCollector implements InternalScanner {
 
   private final InternalScanner internalScanner;

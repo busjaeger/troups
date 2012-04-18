@@ -9,7 +9,6 @@ import edu.illinois.htx.client.transactions.Transaction;
 import edu.illinois.htx.regionserver.RTM;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
-// TODO think about IOException during being/abort/commit
 public class LocalTransaction implements Transaction {
 
   private HTable table;
@@ -53,7 +52,6 @@ public class LocalTransaction implements Transaction {
       try {
         rtm.abort(id);
       } catch (IOException e) {
-        // TODO: should we just ignore this?
         throw new RuntimeException("Failed to rollback", e);
       }
     }

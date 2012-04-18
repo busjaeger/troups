@@ -104,7 +104,6 @@ public class TimestampReclaimer implements Runnable {
                 tryToBecomeCollector();
               } catch (IOException e) {
                 e.printStackTrace();
-                // TODO remove ephemeral node, retry etc.
               }
               break;
             default:

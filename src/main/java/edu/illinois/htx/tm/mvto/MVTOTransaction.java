@@ -99,7 +99,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
      * and permanently remove deleted cells. We can do this on a separate
      * thread, since it is decoupled from the commit operation.
      */
-    // TODO do async if no need to hold region lock (think through recovery)
     afterCommit();
   }
 
@@ -124,7 +123,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
         try {
           tm.getKeyValueStore().deleteVersions(e.getKey(), id);
         } catch (IOException e1) {
-          // TODO retry
           e1.printStackTrace();
           return;
         }
@@ -171,7 +169,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     readFrom.clear();
 
     // cascade abort to transactions that read from this one
-    // TODO handle system errors
     for (Iterator<MVTOTransaction<K>> it = readBy.iterator(); it.hasNext();) {
       MVTOTransaction<K> readBy = it.next();
       readBy.abort();
@@ -186,7 +183,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
         tm.getKeyValueStore().deleteVersion(key, id);
       } catch (IOException e) {
         e.printStackTrace();
-        // TODO handle internal errors (e.g. retry) to avoid resource leaks
         return;
       }
       it.remove();

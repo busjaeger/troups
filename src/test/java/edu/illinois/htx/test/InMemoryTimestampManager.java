@@ -56,4 +56,9 @@ public class InMemoryTimestampManager implements TimestampManager {
     reclamationListeners.add(listener);
   }
 
+  @Override
+  public int compare(Long o1, Long o2) {
+    return o1.compareTo(o2);
+  }
+
 }

@@ -4,7 +4,6 @@ public interface LogRecord<K> {
 
   public enum Type {
     BEGIN, READ, WRITE, DELETE, COMMIT, ABORT, FINALIZE,
-    // TODO XA-specific:
     JOIN, PREPARE
   }
 
@@ -38,7 +37,6 @@ public interface LogRecord<K> {
    */
   Long getVersion();
 
-  // TODO XA-specific
   Long getPID();
 
 }
