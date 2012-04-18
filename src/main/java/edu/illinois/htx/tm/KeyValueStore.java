@@ -23,4 +23,10 @@ public interface KeyValueStore<K extends Key> {
    */
   void deleteVersions(K key, long version) throws IOException;
 
+  /**
+   * Adds observer to the key value store
+   * 
+   * @param observer
+   */
+  void addObserver(KeyValueStoreObserver<K> observer);
 }

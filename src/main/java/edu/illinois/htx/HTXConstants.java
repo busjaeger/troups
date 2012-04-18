@@ -32,16 +32,16 @@ public interface HTXConstants {
 
   public static final String DEFAULT_ZOOKEEPER_ZNODE_BASE = "htx";
 
-  public static final String ZOOKEEPER_ZNODE_TRANSACTIONS = "zookeeper.znode.transactions";
+  public static final String ZOOKEEPER_ZNODE_TIMESTAMPS = "zookeeper.znode.timestamps";
 
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_TRANSACTIONS = "transactions";
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMPS = "timestamps";
 
-  public static final String ZOOKEEPER_ZNODE_COLLECTORS = "zookeeper.znode.collectors";
+  public static final String ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS = "zookeeper.znode.tsrs";
 
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS = "collectors";
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS = "tsrs";
 
-  public static final String ZOOKEEPER_ZNODE_LDT = "zookeeper.znode.ldt";
+  public static final String ZOOKEEPER_ZNODE_LRT = "zookeeper.znode.lrt";
 
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_LDT = "ldt";
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_LRT = "lrt";
 
 }

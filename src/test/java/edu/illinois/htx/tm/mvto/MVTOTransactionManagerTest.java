@@ -38,7 +38,7 @@ public class MVTOTransactionManagerTest {
     tsm = new InMemoryTimestampManager();
     tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log,
         tsm);
-    kvs.setObserver(tm);
+    kvs.addObserver(tm);
     tm.start();
   }
 
@@ -50,9 +50,9 @@ public class MVTOTransactionManagerTest {
   public void testWriteConflict() throws IOException {
     // state in the data store
     StringKey key = new StringKey("x");
-    long version = tsm.next();
+    long version = tsm.create();
     kvs.writeVersion(key, version);
-    tsm.done(version);
+    tsm.delete(version);
 
     long t1 = tm.begin();
     long t2 = tm.begin();
@@ -90,7 +90,7 @@ public class MVTOTransactionManagerTest {
   public void testReadConflict() throws IOException {
     // state in the data store
     StringKey key = new StringKey("x");
-    long version = tsm.next();
+    long version = tsm.create();
     Iterable<StringKey> keys = Arrays.asList(key);
     kvs.writeVersion(key, version);
 
@@ -134,7 +134,7 @@ public class MVTOTransactionManagerTest {
       ExecutionException {
     // state in the data store
     StringKey key = new StringKey("x");
-    long version = tsm.next();
+    long version = tsm.create();
     kvs.writeVersion(key, version);
 
     final long t1 = tm.begin();

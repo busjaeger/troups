@@ -29,7 +29,7 @@ import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.TransactionManager;
 import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
 import edu.illinois.htx.tsm.TimestampManager;
-import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
+import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
 
 /**
  * Note: this class (and all other classes in this package) do not depend on
@@ -88,7 +88,8 @@ import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
  * </ol>
  */
 public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
-    implements KeyValueStoreObserver<K>, TimestampListener, TransactionManager {
+    implements KeyValueStoreObserver<K>, TimestampReclamationListener,
+    TransactionManager {
 
   // immutable state
   // key value store this TM is governing
@@ -140,7 +141,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
       if (running)
         return;
       recover();
-      timestampManager.addLastDeletedTimestampListener(this);
+      timestampManager.addTimestampReclamationListener(this);
       running = true;
     } finally {
       runLock.writeLock().unlock();
@@ -416,7 +417,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
 
   // garbage collection
   @Override
-  public void deleted(long ts) {
+  public void reclaimed(long ts) {
     for (MVTOTransaction<K> ta : getTransactions()) {
       long tid = ta.getID();
       if (tid >= ts)
@@ -536,11 +537,11 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   }
 
   protected void recoverJoin(LogRecord<K> record) {
-    throw new IllegalStateException("Invalid log record "+record);
+    throw new IllegalStateException("Invalid log record " + record);
   }
 
   protected void recoverPrepare(LogRecord<K> record) {
-    throw new IllegalStateException("Invalid log record "+record);
+    throw new IllegalStateException("Invalid log record " + record);
   }
 
 }

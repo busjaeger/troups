@@ -2,39 +2,60 @@ package edu.illinois.htx.tsm;
 
 import java.io.IOException;
 
-/**
- * TODO consider changing to more generic interface:
- * <p>
- * void setState(long ts, TimestampState state) throws IOException;
- * <p>
- * TimestampState getState(long ts) throws IOException;
- * <p>
- * void disconnect(long ts) throws IOException;
- * <p>
- * public interface ConnectionListener { void disconnected(long ts); }
- * 
- */
 public interface TimestampManager {
 
   public interface TimestampListener {
     void deleted(long ts);
   }
 
-  long next() throws IOException;
+  public interface TimestampReclamationListener {
+    /**
+     * Invoked with the latest timestamp reclaimed
+     * 
+     * @param ts
+     */
+    void reclaimed(long ts);
+  }
 
-  void done(long ts) throws NoSuchTimestampException, IOException;
+  /**
+   * Creates a new timestamp. The timestamp exists until it is deleted
+   * explicitly via {@link TimestampManager#delete(long)} or until a certain
+   * timeout period after the creating process crashed.
+   * 
+   * @return
+   * @throws IOException
+   */
+  long create() throws IOException;
 
-  public boolean isDone(long ts) throws NoSuchTimestampException, IOException;
+  /**
+   * Deletes the given timestamp.
+   * 
+   * @param ts
+   * @return true if timestamp existed and was successfully removed, false
+   *         otherwise
+   * @throws IOException
+   */
+  boolean delete(long ts) throws IOException;
 
-  void delete(long ts) throws NoSuchTimestampException, IOException;
+  /**
+   * 
+   * @param ts
+   * @param listener
+   * @return boolean if the timestamp existed and a listener was successfully
+   *         set, false otherwise
+   * @throws IOException
+   */
+  boolean addTimestampListener(long ts, TimestampListener listener)
+      throws IOException;
 
-  // returns all existing time-stamps in sorted order
-  Iterable<Long> getTimestamps() throws IOException;
+  /**
+   * Returns the last timestamp deleted
+   * 
+   * @return
+   * @throws IOException
+   */
+  long getLastReclaimedTimestamp() throws IOException;
 
-  long getLastDeletedTimestamp() throws IOException;
-
-  void setLastDeletedTimestamp(long ts) throws IOException;
-
-  void addLastDeletedTimestampListener(TimestampListener listener);
+  void addTimestampReclamationListener(TimestampReclamationListener listener);
 
 }

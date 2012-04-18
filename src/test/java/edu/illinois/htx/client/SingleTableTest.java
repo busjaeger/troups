@@ -1,6 +1,5 @@
 package edu.illinois.htx.client;
 
-import static edu.illinois.htx.client.HTX.HTX;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -11,6 +10,8 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import edu.illinois.htx.client.transactions.Transaction;
+import edu.illinois.htx.client.transactions.TransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 public class SingleTableTest {
@@ -25,8 +26,8 @@ public class SingleTableTest {
     byte[] qualifier = toBytes("main");
 
     Configuration conf = HBaseConfiguration.create();
-    TransactionManager tm = HTX.getTransactionManager(conf);
-    HTXTable table = HTX.getTable(conf, tableName);
+    TransactionManager tm = TransactionManager.get(conf);
+    HTXTable table = new HTXTable(conf, tableName);
 
     Transaction ta = tm.begin();
     try {

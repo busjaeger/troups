@@ -2,10 +2,10 @@ package edu.illinois.htx.tsm.zk;
 
 import static edu.illinois.htx.HTXConstants.DEFAULT_TM_TSC_INTERVAL;
 import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
-import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS;
+import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
 import static edu.illinois.htx.HTXConstants.TM_TSC_INTERVAL;
 import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_BASE;
-import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_COLLECTORS;
+import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
 import static edu.illinois.htx.tsm.zk.Util.join;
 import static edu.illinois.htx.tsm.zk.Util.setWatch;
 import static edu.illinois.htx.tsm.zk.Util.toDir;
@@ -26,31 +26,26 @@ import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.ZooDefs.Ids;
 
 import edu.illinois.htx.tsm.NoSuchTimestampException;
-import edu.illinois.htx.tsm.TimestampManager;
 
-/*
- * Note: this timestamp collector implementation uses Zookeeper for leader election, but is NOT tied the Zookeeper TimestampManager implementation.
- */
-public class TimestampCollector implements Runnable {
+public class TimestampReclaimer implements Runnable {
 
-  private final TimestampManager tsm;
+  private final ReclaimableTimestampManager tsm;
   private final ZooKeeperWatcher zkw;
   private final ScheduledExecutorService pool;
   private final long interval;
   private final String collectorsNode;
 
   private String zNode;
-  private boolean ldtSet;
-  private long ldt;
+  private Long lrt;
 
-  public TimestampCollector(TimestampManager tsm, Configuration conf,
-      ScheduledExecutorService pool, ZooKeeperWatcher zkw) {
+  public TimestampReclaimer(ReclaimableTimestampManager tsm,
+      Configuration conf, ScheduledExecutorService pool, ZooKeeperWatcher zkw) {
     this.tsm = tsm;
     this.zkw = zkw;
     this.pool = pool;
     String htx = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
-    String collectors = conf.get(ZOOKEEPER_ZNODE_COLLECTORS,
-        DEFAULT_ZOOKEEPER_ZNODE_COLLECTORS);
+    String collectors = conf.get(ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS,
+        DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS);
     this.collectorsNode = join(zkw.baseZNode, htx, collectors);
     this.interval = conf.getLong(TM_TSC_INTERVAL, DEFAULT_TM_TSC_INTERVAL);
   }
@@ -131,33 +126,42 @@ public class TimestampCollector implements Runnable {
   @Override
   public void run() {
     try {
-      if (!ldtSet) {
-        ldt = tsm.getLastDeletedTimestamp();
-        ldtSet = true;
-      }
+      if (lrt == null)
+        lrt = tsm.getLastReclaimedTimestamp();
 
-      long newLDT = ldt;
+      long newLrt = lrt;
       List<Long> deletes = new ArrayList<Long>();
-      for (long ts : tsm.getTimestamps()) {
-        if (ts < ldt)
-          deletes.add(ts);
-        else if (ts >= ldt) {
-          try {
-            if (!tsm.isDone(ts)) {
-              ldt = ts;
-              break;
-            }
-          } catch (NoSuchTimestampException e) {
-            // got deleted in the meantime somehow
-            continue;
+      // the order of these two calls is important: it's OK to not reclaim a
+      // timestamp, but not OK to reclaim one that's still in use!
+      long lct = tsm.getLastCreatedTimestamp();
+      Iterable<Long> timestamps = tsm.getTimestamps();
+
+      if (!timestamps.iterator().hasNext()) {
+        newLrt = lct;
+      } else {
+        for (long ts : tsm.getTimestamps()) {
+          // time-stamps that we failed to delete before
+          if (ts < lrt) {
+            deletes.add(ts);
           }
-          deletes.add(ts);
+          // time-stamps after current lrt: check if still needed
+          else if (ts >= lrt) {
+            try {
+              if (tsm.hasReferences(ts)) {
+                lrt = ts;
+                break;
+              }
+            } catch (NoSuchTimestampException e) {
+              // got deleted since we retrieved it
+              continue;
+            }
+            deletes.add(ts);
+          }
         }
       }
-
-      if (newLDT != ldt) {
-        tsm.setLastDeletedTimestamp(newLDT);
-        ldt = newLDT;
+      if (newLrt != lrt) {
+        tsm.setLastReclaimedTimestamp(newLrt);
+        lrt = newLrt;
       }
 
       for (Long delete : deletes)

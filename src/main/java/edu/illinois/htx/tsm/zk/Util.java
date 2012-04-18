@@ -15,6 +15,13 @@ public final class Util {
     super();
   }
 
+  static String create(ZooKeeperWatcher zkw, String znode,
+      byte[] data, CreateMode mode) throws InterruptedException, KeeperException {
+    ZKUtil.waitForZKConnectionIfAuthenticating(zkw);
+    return zkw.getRecoverableZooKeeper().create(znode, data,
+        Ids.OPEN_ACL_UNSAFE, mode);
+  }
+  
   static String createWithParents(ZooKeeperWatcher zkw, String znode,
       byte[] data, CreateMode mode) throws KeeperException,
       InterruptedException {

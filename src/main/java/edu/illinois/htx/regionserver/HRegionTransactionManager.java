@@ -19,6 +19,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
@@ -39,12 +40,14 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.HTXConstants;
+import edu.illinois.htx.tm.KeyValueStore;
+import edu.illinois.htx.tm.KeyValueStoreObserver;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.mvto.XAMVTOTransactionManager;
-import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
-import edu.illinois.htx.tsm.zk.TimestampCollector;
-import edu.illinois.htx.tsm.zk.ZKXATimestampManager;
+import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
+import edu.illinois.htx.tsm.zk.TimestampReclaimer;
+import edu.illinois.htx.tsm.zk.ZKSharedTimestampManager;
 
 /**
  * TODO (in order of priority):
@@ -57,16 +60,17 @@ import edu.illinois.htx.tsm.zk.ZKXATimestampManager;
  * </ol>
  */
 public class HRegionTransactionManager extends BaseRegionObserver implements
-    RTM, TimestampListener {
+    RTM, TimestampReclamationListener, KeyValueStore<HKey> {
 
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
 
+  private HRegion region;
   private XAMVTOTransactionManager<HKey, HLogRecord> tm;
-  private ZKXATimestampManager tsm;
+  private ZKSharedTimestampManager tsm;
   private ScheduledExecutorService pool;
-  private TimestampCollector collector;
-  private volatile long ldt;
+  private TimestampReclaimer collector;
+  private volatile long lrt;
 
   // TODO think about startup/ownership
   @Override
@@ -74,31 +78,30 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     RegionCoprocessorEnvironment env = ((RegionCoprocessorEnvironment) e);
     Configuration conf = env.getConfiguration();
     ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
+    region = env.getRegion();
 
     // create thread pool
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
     pool = Executors.newScheduledThreadPool(count);
 
     // start time-stamp manager
-    ZKXATimestampManager tsm = new ZKXATimestampManager(zkw);
+    ZKSharedTimestampManager tsm = new ZKSharedTimestampManager(zkw);
     tsm.start();
 
     // create transaction manager
-    HRegion region = env.getRegion();
-    HRegionKeyValueStore kvs = new HRegionKeyValueStore(region);
     HRegionInfo regionInfo = region.getRegionInfo();
     HConnection connection = env.getRegionServerServices().getCatalogTracker()
         .getConnection();
     HRegionLog tlog = HRegionLog.newInstance(connection, pool, regionInfo);
-    tm = new XAMVTOTransactionManager<HKey, HLogRecord>(kvs, tlog, tsm);
+    tm = new XAMVTOTransactionManager<HKey, HLogRecord>(this, tlog, tsm);
 
     // create timestamp collector
-    collector = new TimestampCollector(tsm, conf, pool, zkw);
+    collector = new TimestampReclaimer(tsm, conf, pool, zkw);
   }
 
   @Override
   public void preOpen(ObserverContext<RegionCoprocessorEnvironment> ctx) {
-    tsm.addLastDeletedTimestampListener(this);
+    tsm.addTimestampReclamationListener(this);
     tsm.start();
     try {
       // 1. start transaction manager
@@ -180,8 +183,26 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (e.getEnvironment().getRegion().getRegionInfo().isMetaTable()) {
       return scanner;
     } else {
-      return new VersionCollector(scanner, ldt);
+      return new VersionCollector(scanner, lrt);
     }
+  }
+
+  @Override
+  public void deleteVersion(HKey key, long version) throws IOException {
+    Delete delete = new Delete(key.getRow());
+    delete.deleteColumn(key.getFamily(), key.getQualifier(), version);
+    region.delete(delete, null, true);
+  }
+
+  @Override
+  public void deleteVersions(HKey key, long version) throws IOException {
+    Delete delete = new Delete(key.getRow());
+    delete.deleteColumn(key.getFamily(), key.getQualifier(), version);
+    region.delete(delete, null, true);
+  }
+
+  @Override
+  public void addObserver(KeyValueStoreObserver<HKey> observer) {
   }
 
   @Override
@@ -223,8 +244,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void deleted(long timestamp) {
-    ldt = timestamp;
+  public void reclaimed(long timestamp) {
+    lrt = timestamp;
   }
 
   private static Long getTID(OperationWithAttributes operation) {

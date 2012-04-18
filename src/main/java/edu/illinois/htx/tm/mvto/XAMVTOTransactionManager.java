@@ -7,22 +7,21 @@ import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord;
 import edu.illinois.htx.tm.XATransactionManager;
-import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
 import edu.illinois.htx.tm.mvto.XAMVTOTransaction.XAState;
-import edu.illinois.htx.tsm.XATimestampManager;
+import edu.illinois.htx.tsm.SharedTimestampManager;
 
 public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     extends MVTOTransactionManager<K, R> implements XATransactionManager {
 
   public XAMVTOTransactionManager(KeyValueStore<K> keyValueStore,
-      Log<K, R> log, XATimestampManager timestampManager) {
+      Log<K, R> log, SharedTimestampManager timestampManager) {
     super(keyValueStore, log, timestampManager);
   }
 
   @Override
-  public XATimestampManager getTimestampManager() {
-    return (XATimestampManager) super.getTimestampManager();
+  public SharedTimestampManager getTimestampManager() {
+    return (SharedTimestampManager) super.getTimestampManager();
   }
 
   @Override

@@ -19,8 +19,10 @@ import java.util.Set;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyVersions;
+import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tsm.TimestampManager;
 
 class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
@@ -49,10 +51,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     this.readBy = new HashSet<MVTOTransaction<K>>(0);
   }
 
-  // ----------------------------------------------------------------------
-  // state transition methods
-  // ----------------------------------------------------------------------
-
   public final synchronized void begin() throws IOException {
     switch (state) {
     case CREATED:
@@ -69,8 +67,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   // being == get/set ID
   protected void doBegin() throws IOException {
-    setID(tm.getTimestampManager().next());
-    setSID(tm.getTransactionLog().append(Type.BEGIN, id));
+    setID(getTimestampManager().create());
+    setSID(getTransactionLog().append(Type.BEGIN, id));
     setState(ACTIVE);
   }
 
@@ -93,7 +91,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   protected void doCommit() throws TransactionAbortedException, IOException {
     waitUntilReadFromEmpty();
 
-    tm.getTransactionLog().append(Type.COMMIT, id);
+    getTransactionLog().append(Type.COMMIT, id);
     setState(COMMITTED);
 
     /*
@@ -134,12 +132,9 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       it.remove();
     }
     // logging once is sufficient, since delete operation idempotent
-    tm.getTransactionLog().append(Type.FINALIZE, id);
+    getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
-  }
-
-  protected void committed() throws IOException {
-    tm.getTimestampManager().done(id);
+    afterFinalize();
   }
 
   public final synchronized void abort() throws IOException {
@@ -158,7 +153,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   protected void doAbort() throws IOException {
-    tm.getTransactionLog().append(Type.ABORT, id);
+    getTransactionLog().append(Type.ABORT, id);
     if (state == BLOCKED)
       notify();
     setState(ABORTED);
@@ -197,13 +192,13 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       it.remove();
     }
 
-    tm.getTransactionLog().append(Type.FINALIZE, id);
+    getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
-    aborted();
+    afterFinalize();
   }
 
-  protected void aborted() throws IOException {
-    tm.getTimestampManager().done(id);
+  protected void afterFinalize() throws IOException {
+    getTimestampManager().delete(id);
   }
 
   public final synchronized void afterRead(
@@ -274,7 +269,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           }
 
           // remember read for conflict detection
-          tm.getTransactionLog().append(Type.READ, id, key, version);
+          getTransactionLog().append(Type.READ, id, key, version);
           addRead(key, version);
           tm.addReader(key, version, this);
 
@@ -330,8 +325,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          * reads results and to delete values from the underlying data store
          * when the transaction commits
          */
-        tm.getTransactionLog().append(isDelete ? Type.DELETE : Type.WRITE, id,
-            key);
+        getTransactionLog()
+            .append(isDelete ? Type.DELETE : Type.WRITE, id, key);
         addWrite(key, isDelete);
         /*
          * Add write in progress, so readers can check if they see the version
@@ -364,6 +359,14 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   // getter/setters for transaction state
   // used by state transitions methods and recovery process
   // ----------------------------------------------------------------------
+
+  protected Log<K, ?> getTransactionLog() {
+    return tm.getTransactionLog();
+  }
+
+  protected TimestampManager getTimestampManager() {
+    return tm.getTimestampManager();
+  }
 
   synchronized long getID() {
     if (state == State.CREATED)

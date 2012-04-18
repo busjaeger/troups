@@ -1,4 +1,4 @@
-package edu.illinois.htx.client.impl;
+package edu.illinois.htx.client.transactions.impl;
 
 import java.io.IOException;
 

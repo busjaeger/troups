@@ -1,10 +1,10 @@
-package edu.illinois.htx.client;
+package edu.illinois.htx.client.transactions;
 
 import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
 
-import edu.illinois.htx.client.impl.TransactionManagerImpl;
+import edu.illinois.htx.client.transactions.impl.TransactionManagerImpl;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 public abstract class TransactionManager {

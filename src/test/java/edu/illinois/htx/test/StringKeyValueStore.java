@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
@@ -26,35 +27,32 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
     }
   };
 
-  private KeyValueStoreObserver<StringKey> observer;
+  private final List<KeyValueStoreObserver<StringKey>> observers;
   private final NavigableMap<StringKey, NavigableMap<Long, Object>> values;
 
   public StringKeyValueStore() {
     this.values = new TreeMap<StringKey, NavigableMap<Long, Object>>();
-  }
-
-  public void setObserver(KeyValueStoreObserver<StringKey> observer) {
-    this.observer = observer;
+    this.observers = new ArrayList<KeyValueStoreObserver<StringKey>>();
   }
 
   public void writeVersionObserved(long tid, StringKey key)
       throws TransactionAbortedException, IOException {
     Iterable<StringKey> keys = Arrays.asList(key);
-    if (observer != null)
+    for (KeyValueStoreObserver<StringKey> observer : observers)
       observer.beforeWrite(tid, false, keys);
     writeVersion(key, tid);
-    if (observer != null)
+    for (KeyValueStoreObserver<StringKey> observer : observers)
       observer.afterWrite(tid, false, keys);
   }
 
   public Iterable<Long> readVersionsObserved(long tid, final StringKey key)
       throws TransactionAbortedException, IOException {
-    if (observer != null) {
+    for (KeyValueStoreObserver<StringKey> observer : observers) {
       Iterable<StringKey> keys = Arrays.asList(key);
       observer.beforeRead(tid, keys);
     }
     Iterable<Long> versions = readVersions(key, tid);
-    if (observer != null) {
+    for (KeyValueStoreObserver<StringKey> observer : observers) {
       Iterable<StringKeyVersions> kvs = asList(new StringKeyVersions(key,
           versions));
       observer.afterRead(tid, kvs);
@@ -98,5 +96,9 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
     if (versions == null)
       values.put(key, versions = new TreeMap<Long, Object>(VersionComparator));
     versions.put(version, new Object());
+  }
+
+  @Override
+  public void addObserver(KeyValueStoreObserver<StringKey> observer) {
   }
 }

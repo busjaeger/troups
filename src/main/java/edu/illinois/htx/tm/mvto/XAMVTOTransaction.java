@@ -7,8 +7,10 @@ import java.io.IOException;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tsm.SharedTimestampManager;
+import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
-public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
+public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> implements TimestampListener {
 
   static enum XAState {
     CREATED, JOINED, PREPARED
@@ -42,12 +44,12 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
     case FINALIZED:
       throw newISA("join");
     }
-
-    long pid = getTM().getTimestampManager().join(id);
+    long pid = getTimestampManager().createReference(id);
+    getTimestampManager().addReferenceListener(id, 0, this);
     setID(id);
     setPID(pid);
-    // fail here: we don't know that we joined, but client will abort
-    setSID(getTM().getTransactionLog().append(Type.JOIN, id, getPID()));
+    // if we fail here, TSM will clean up reference and client will abort
+    setSID(getTransactionLog().append(Type.JOIN, id, getPID()));
     setState(State.ACTIVE);
     setXAState(XAState.JOINED);
   }
@@ -71,24 +73,29 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
     case PREPARED:
       throw newISA("prepare");
     }
-
     waitUntilReadFromEmpty();
-    getTM().getTimestampManager().prepared(id, pid);
-    // fail here -> we don't know that we prepared, but we can check TSM upon
-    // restart. I.e. if we see 'JOINED' in the log, we can check if TA is
-    // committing
-    getTM().getTransactionLog().append(Type.PREPARE, id);
+    getTransactionLog().append(Type.PREPARE, id);
     setXAState(XAState.PREPARED);
   }
 
+  /**
+   * Client crashed
+   *
+   * @param ts
+   */
   @Override
-  protected void aborted() throws IOException {
-    getTM().getTimestampManager().aborted(id, pid);
+  public void deleted(long ts) {
+    
   }
 
   @Override
-  protected void committed() throws IOException {
-    getTM().getTimestampManager().committed(id, pid);
+  protected void afterFinalize() throws IOException {
+    getTimestampManager().releaseReference(id, pid);
+  }
+
+  @Override
+  protected SharedTimestampManager getTimestampManager() {
+    return ((XAMVTOTransactionManager<K, ?>) tm).getTimestampManager();
   }
 
   synchronized void setXAState(XAState xaState) {
@@ -108,4 +115,5 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
   synchronized void setPID(long pid) {
     this.pid = pid;
   }
+
 }

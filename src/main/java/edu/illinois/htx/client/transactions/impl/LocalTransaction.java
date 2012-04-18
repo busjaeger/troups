@@ -1,11 +1,11 @@
-package edu.illinois.htx.client.impl;
+package edu.illinois.htx.client.transactions.impl;
 
 import java.io.IOException;
 
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import edu.illinois.htx.client.Transaction;
+import edu.illinois.htx.client.transactions.Transaction;
 import edu.illinois.htx.regionserver.RTM;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
