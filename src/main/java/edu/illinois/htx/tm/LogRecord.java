@@ -3,10 +3,12 @@ package edu.illinois.htx.tm;
 public interface LogRecord<K> {
 
   public enum Type {
-    BEGIN, READ, WRITE, DELETE, COMMIT, ABORT, FINALIZE
+    BEGIN, READ, WRITE, DELETE, COMMIT, ABORT, FINALIZE,
+    // TODO XA-specific:
+    JOIN, PREPARE
   }
 
-  LogRecord.Type getType();
+  Type getType();
 
   /**
    * log sequence number
@@ -34,6 +36,9 @@ public interface LogRecord<K> {
    * 
    * @return
    */
-  long getVersion();
+  Long getVersion();
+
+  // TODO XA-specific
+  Long getPID();
 
 }

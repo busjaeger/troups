@@ -148,9 +148,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   }
 
   public synchronized void stop(boolean abort) {
-    
-    
-    
+
     if (!runLock.writeLock().tryLock()) {
       while (true) {
         for (MVTOTransaction<K> ta : transactions.values())
@@ -461,12 +459,14 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
    * @throws IOException
    */
   // TODO think through recovery
+  // TODO factor out 'JOIN' and 'PREPARED' properly
   private void recover() throws IOException {
     for (LogRecord<K> record : transactionLog.recover()) {
       long tid = record.getTID();
+      Type type = record.getType();
       // ignore transactions that began before the log save-point
       MVTOTransaction<K> ta = transactions.get(tid);
-      if (ta == null && record.getType() != Type.BEGIN)
+      if (ta == null && !(type == Type.BEGIN || type == Type.JOIN))
         continue;
 
       switch (record.getType()) {
@@ -524,8 +524,22 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
           // this shouldn't happen
         }
       }
+      case JOIN:
+        recoverJoin(record);
+        break;
+      case PREPARE:
+        recoverPrepare(record);
+        break;
       }
     }
+  }
+
+  protected void recoverJoin(LogRecord<K> record) {
+    throw new IllegalStateException("Invalid log record "+record);
+  }
+
+  protected void recoverPrepare(LogRecord<K> record) {
+    throw new IllegalStateException("Invalid log record "+record);
   }
 
 }

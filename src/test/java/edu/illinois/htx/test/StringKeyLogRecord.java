@@ -9,14 +9,16 @@ public class StringKeyLogRecord implements LogRecord<StringKey> {
   private final Type type;
   private final StringKey key;
   private final Long version;
+  private final Long pid;
 
   public StringKeyLogRecord(long sid, long tid, Type type, StringKey key,
-      Long version) {
+      Long version, Long pid) {
     this.sid = sid;
     this.tid = tid;
     this.type = type;
     this.key = key;
     this.version = version;
+    this.pid = pid;
   }
 
   @Override
@@ -40,8 +42,12 @@ public class StringKeyLogRecord implements LogRecord<StringKey> {
   }
 
   @Override
-  public long getVersion() {
+  public Long getVersion() {
     return version;
   }
 
+  @Override
+  public Long getPID() {
+    return pid;
+  }
 }

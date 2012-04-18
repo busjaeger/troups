@@ -99,8 +99,9 @@ public class HRegionLog extends Log<HKey, HLogRecord> {
   }
 
   @Override
-  public HLogRecord newRecord(Type type, long tid, HKey key, Long version) {
-    return new HLogRecord(sid.getAndIncrement(), tid, type, key, version);
+  public HLogRecord newRecord(Type type, long tid, HKey key, Long version,
+      Long pid) {
+    return new HLogRecord(sid.getAndIncrement(), tid, type, key, version, pid);
   }
 
   @Override

@@ -33,6 +33,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   // mutable state
   protected long id;
+  protected long sid;
   protected State state;
   private final Map<K, Long> reads;
   private final Map<K, Boolean> writes;
@@ -52,7 +53,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   // state transition methods
   // ----------------------------------------------------------------------
 
-  public synchronized void begin() throws IOException {
+  public final synchronized void begin() throws IOException {
     switch (state) {
     case CREATED:
       break;
@@ -69,11 +70,11 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   // being == get/set ID
   protected void doBegin() throws IOException {
     setID(tm.getTimestampManager().next());
-    tm.getTransactionLog().append(Type.BEGIN, id);
+    setSID(tm.getTransactionLog().append(Type.BEGIN, id));
     setState(ACTIVE);
   }
 
-  public synchronized void commit() throws TransactionAbortedException,
+  public final synchronized void commit() throws TransactionAbortedException,
       IOException {
     switch (state) {
     case COMMITTED:
@@ -135,10 +136,13 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     // logging once is sufficient, since delete operation idempotent
     tm.getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
+  }
+
+  protected void committed() throws IOException {
     tm.getTimestampManager().done(id);
   }
 
-  public synchronized void abort() throws IOException {
+  public final synchronized void abort() throws IOException {
     switch (state) {
     case ACTIVE:
     case BLOCKED:
@@ -195,11 +199,15 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
     tm.getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
+    aborted();
+  }
+
+  protected void aborted() throws IOException {
     tm.getTimestampManager().done(id);
   }
 
-  public synchronized void afterRead(Iterable<? extends KeyVersions<K>> kvs)
-      throws IOException {
+  public final synchronized void afterRead(
+      Iterable<? extends KeyVersions<K>> kvs) throws IOException {
     switch (state) {
     case ACTIVE:
       break;
@@ -282,7 +290,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  public synchronized void beforeWrite(boolean isDelete,
+  public final synchronized void beforeWrite(boolean isDelete,
       Iterable<? extends K> keys) throws IOException {
     switch (state) {
     case ACTIVE:
@@ -322,7 +330,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          * reads results and to delete values from the underlying data store
          * when the transaction commits
          */
-        tm.getTransactionLog().append(isDelete ? Type.DELETE : Type.WRITE, id, key);
+        tm.getTransactionLog().append(isDelete ? Type.DELETE : Type.WRITE, id,
+            key);
         addWrite(key, isDelete);
         /*
          * Add write in progress, so readers can check if they see the version
@@ -335,7 +344,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  public synchronized void afterWrite(boolean isDelete,
+  public final synchronized void afterWrite(boolean isDelete,
       Iterable<? extends K> keys) {
     for (K key : keys) {
       tm.lock(key);
@@ -364,6 +373,16 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   synchronized void setID(long id) {
     this.id = id;
+  }
+
+  synchronized long getSID() {
+    if (state == State.CREATED)
+      throw newISA("getSID");
+    return this.sid;
+  }
+
+  synchronized void setSID(long sid) {
+    this.sid = sid;
   }
 
   synchronized State getState() {

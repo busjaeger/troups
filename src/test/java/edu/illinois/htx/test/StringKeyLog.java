@@ -19,8 +19,8 @@ public class StringKeyLog extends Log<StringKey, StringKeyLogRecord> {
 
   @Override
   public StringKeyLogRecord newRecord(Type type, long tid, StringKey key,
-      Long version) {
-    return new StringKeyLogRecord(seqid++, tid, type, key, version);
+      Long version, Long pid) {
+    return new StringKeyLogRecord(seqid++, tid, type, key, version, pid);
   }
 
   @Override

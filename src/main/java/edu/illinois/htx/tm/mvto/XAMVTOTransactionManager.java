@@ -6,10 +6,7 @@ import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord;
-import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.XATransactionManager;
-import edu.illinois.htx.tm.mvto.MVTOTransactionManager.WithReadLock;
-import edu.illinois.htx.tsm.TimestampManager;
 import edu.illinois.htx.tsm.XATimestampManager;
 
 public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
@@ -31,9 +28,9 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     try {
       checkRunning();
       XAMVTOTransaction<K> ta = new XAMVTOTransaction<K>(this);
-      long pid = ta.join();
+      ta.join(tid);
       addTransaction(ta);
-      return pid;
+      return ta.getPID();
     } finally {
       runLock.readLock().unlock();
     }
@@ -43,39 +40,12 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   public void prepare(final long tid) throws IOException {
     new WithReadLock() {
       void execute(MVTOTransaction<K> ta) throws IOException {
-        ta.prepare();
+        if (!(ta instanceof XAMVTOTransaction))
+          throw new IllegalStateException("Cannot prepare non XA transaction");
+        ((XAMVTOTransaction<K>) ta).prepare();
         System.out.println("Prepared " + tid);
       }
     }.run(tid);
-  }
-
-  @Override
-  public void abort(long tid) throws IOException {
-  }
-
-  @Override
-  public void commit(long tid) throws TransactionAbortedException, IOException {
-
-  case PREPARED:
-    tm.getLog().appendStateChange(id, PRE_COMMITTED);
-    state = PRE_COMMITTED;
-    tm.getTimestampManager().done(id, pid);
-    break;
-
-  case PRE_COMMITTED:
-    tm.getTimestampManager().done(id, pid);
-    break;
-  }
-
-  MVTOTransaction<K> createTransaction() throws IOException {
-    MVTOTransaction<K> ta;
-    synchronized (transactions) {
-      if (transactions.containsKey(tid))
-        throw new IllegalStateException("Transaction " + tid
-            + " already exists");
-      transactions.put(tid, ta = new MVTOTransaction<K>(tid, this));
-    }
-    return ta;
   }
 
 }

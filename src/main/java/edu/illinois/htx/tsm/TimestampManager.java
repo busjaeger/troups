@@ -22,7 +22,7 @@ public interface TimestampManager {
 
   long next() throws IOException;
 
-  void done(long ts) throws IOException;
+  void done(long ts) throws NoSuchTimestampException, IOException;
 
   public boolean isDone(long ts) throws NoSuchTimestampException, IOException;
 

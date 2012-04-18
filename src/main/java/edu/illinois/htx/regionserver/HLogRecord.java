@@ -8,7 +8,8 @@ import org.apache.hadoop.io.Writable;
 
 import edu.illinois.htx.tm.LogRecord;
 
-public class HLogRecord implements LogRecord<HKey>, Writable, Comparable<HLogRecord> {
+public class HLogRecord implements LogRecord<HKey>, Writable,
+    Comparable<HLogRecord> {
 
   private static final int VERSION = 0;
 
@@ -17,17 +18,20 @@ public class HLogRecord implements LogRecord<HKey>, Writable, Comparable<HLogRec
   private Type type;
   private HKey key;
   private Long version;
+  private Long pid;
 
   public HLogRecord() {
     super();
   }
 
-  public HLogRecord(long sid, long tid, Type type, HKey key, Long version) {
+  public HLogRecord(long sid, long tid, Type type, HKey key, Long version,
+      Long pid) {
     this.sid = sid;
     this.tid = tid;
     this.type = type;
     this.key = key;
     this.version = version;
+    this.pid = pid;
   }
 
   @Override
@@ -51,8 +55,13 @@ public class HLogRecord implements LogRecord<HKey>, Writable, Comparable<HLogRec
   }
 
   @Override
-  public long getVersion() {
+  public Long getVersion() {
     return version;
+  }
+
+  @Override
+  public Long getPID() {
+    return pid;
   }
 
   @Override
