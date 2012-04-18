@@ -17,8 +17,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
   private long pid;
   private XAState xaState;
 
-  public XAMVTOTransaction(XAMVTOTransactionManager<K, ?> tm)
-      throws IOException {
+  public XAMVTOTransaction(XAMVTOTransactionManager<K, ?> tm) {
     super(tm);
     xaState = CREATED;
   }
@@ -44,12 +43,13 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
       throw newISA("join");
     }
 
+    long pid = getTM().getTimestampManager().join(id);
     setID(id);
-    setPID(this.pid = getTM().getTimestampManager().join(id));
+    setPID(pid);
     // fail here: we don't know that we joined, but client will abort
-    setSID(getTM().getTransactionLog().append(Type.JOIN, id));
+    setSID(getTM().getTransactionLog().append(Type.JOIN, id, getPID()));
     setState(State.ACTIVE);
-    xaState = XAState.JOINED;
+    setXAState(XAState.JOINED);
   }
 
   public synchronized void prepare() throws TransactionAbortedException,
@@ -78,7 +78,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
     // restart. I.e. if we see 'JOINED' in the log, we can check if TA is
     // committing
     getTM().getTransactionLog().append(Type.PREPARE, id);
-    xaState = XAState.PREPARED;
+    setXAState(XAState.PREPARED);
   }
 
   @Override
@@ -89,6 +89,14 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> {
   @Override
   protected void committed() throws IOException {
     getTM().getTimestampManager().committed(id, pid);
+  }
+
+  synchronized void setXAState(XAState xaState) {
+    this.xaState = xaState;
+  }
+
+  synchronized XAState getXAState() {
+    return xaState;
   }
 
   synchronized long getPID() {

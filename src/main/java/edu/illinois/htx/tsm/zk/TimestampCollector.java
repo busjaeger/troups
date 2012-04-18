@@ -54,7 +54,7 @@ public class TimestampCollector implements Runnable {
     this.collectorsNode = join(zkw.baseZNode, htx, collectors);
     this.interval = conf.getLong(TM_TSC_INTERVAL, DEFAULT_TM_TSC_INTERVAL);
   }
- 
+
   public void start() throws IOException {
     try {
       zNode = createWithParents(toDir(collectorsNode), new byte[0],

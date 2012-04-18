@@ -17,7 +17,11 @@ public abstract class Log<K extends Key, R extends LogRecord<K>> {
   // convenience methods
 
   public long append(Type type, long tid) throws IOException {
-    return append(type, tid, null);
+    return append(type, tid, (K)null);
+  }
+
+  public long append(Type type, long tid, Long pid) throws IOException {
+    return append(type, tid, null, null, pid);
   }
 
   public long append(Type type, long tid, K key) throws IOException {

@@ -473,6 +473,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
       case BEGIN: {
         transactions.put(tid, ta = new MVTOTransaction<K>(this));
         ta.setID(tid);
+        ta.setSID(record.getSID());
         ta.setState(State.ACTIVE);
         break;
       }

@@ -32,7 +32,7 @@ import org.apache.hadoop.io.WritableUtils;
 import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord.Type;
 
-// TODO start/stop behavior
+// TODO auto-create log table
 public class HRegionLog extends Log<HKey, HLogRecord> {
 
   public static HRegionLog newInstance(HConnection connection,

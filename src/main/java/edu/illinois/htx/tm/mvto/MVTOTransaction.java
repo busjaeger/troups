@@ -40,7 +40,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   private final Set<MVTOTransaction<K>> readFrom;
   private final Set<MVTOTransaction<K>> readBy;
 
-  public MVTOTransaction(MVTOTransactionManager<K, ?> tm) throws IOException {
+  public MVTOTransaction(MVTOTransactionManager<K, ?> tm) {
     this.state = CREATED;
     this.tm = tm;
     this.reads = new HashMap<K, Long>();

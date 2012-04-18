@@ -7,6 +7,9 @@ import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.Log;
 import edu.illinois.htx.tm.LogRecord;
 import edu.illinois.htx.tm.XATransactionManager;
+import edu.illinois.htx.tm.LogRecord.Type;
+import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
+import edu.illinois.htx.tm.mvto.XAMVTOTransaction.XAState;
 import edu.illinois.htx.tsm.XATimestampManager;
 
 public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
@@ -48,4 +51,21 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     }.run(tid);
   }
 
+  @Override
+  protected void recoverJoin(LogRecord<K> record) {
+    XAMVTOTransaction<K> ta = new XAMVTOTransaction<K>(this);
+    ta.setID(record.getTID());
+    ta.setPID(record.getPID());
+    ta.setSID(record.getSID());
+    ta.setState(State.ACTIVE);
+    ta.setXAState(XAState.JOINED);
+    addTransaction(ta);
+  }
+
+  @Override
+  protected void recoverPrepare(LogRecord<K> record) {
+    XAMVTOTransaction<K> ta = (XAMVTOTransaction<K>) getTransaction(record
+        .getTID());
+    ta.setXAState(XAState.PREPARED);
+  }
 }
