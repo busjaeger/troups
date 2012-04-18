@@ -10,7 +10,8 @@ import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
-public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> implements TimestampListener {
+public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
+    implements TimestampListener {
 
   static enum XAState {
     CREATED, JOINED, PREPARED
@@ -45,7 +46,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> impleme
       throw newISA("join");
     }
     long pid = getTimestampManager().createReference(id);
-    getTimestampManager().addReferenceListener(id, 0, this);
+    getTimestampManager().addTimestampListener(id, this);
     setID(id);
     setPID(pid);
     // if we fail here, TSM will clean up reference and client will abort
@@ -79,13 +80,29 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K> impleme
   }
 
   /**
-   * Client crashed
-   *
+   * Transaction has been aborted: note this method will only be called if the
+   * prepare phase was unsuccessful.
+   * 
    * @param ts
    */
   @Override
-  public void deleted(long ts) {
-    
+  public synchronized void deleted(long ts) {
+    switch (state) {
+    case FINALIZED:
+    case COMMITTED:
+    case ABORTED:
+      return;
+    case ACTIVE:
+    case BLOCKED:
+      break;
+    case CREATED:
+      throw newISA("deleted");
+    }
+    try {
+      abort();
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
   }
 
   @Override

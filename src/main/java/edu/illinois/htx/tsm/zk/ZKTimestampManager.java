@@ -102,18 +102,28 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   public boolean addTimestampListener(final long ts,
       final TimestampListener listener) throws IOException {
     String tsNode = Util.join(timestampsNode, ts);
-    try {
-      return Util.setWatch(watcher, tsNode, new Watcher() {
-        @Override
-        public void process(WatchedEvent event) {
-          switch (event.getType()) {
-          case NodeDeleted:
-            listener.deleted(ts);
-          default:
-            break;
-          }
+    return addTimestampListener(ts, tsNode, listener);
+  }
+
+  protected boolean addTimestampListener(final long ts, final String node,
+      final TimestampListener listener) throws IOException {
+    return addTimestampListener(node, new Watcher() {
+      @Override
+      public void process(WatchedEvent event) {
+        switch (event.getType()) {
+        case NodeDeleted:
+          listener.deleted(ts);
+        default:
+          break;
         }
-      });
+      }
+    });
+  }
+
+  protected boolean addTimestampListener(final String node,
+      final Watcher watcher) throws IOException {
+    try {
+      return Util.setWatch(this.watcher, node, watcher);
     } catch (KeeperException e) {
       throw new IOException(e);
     } catch (InterruptedException e) {
