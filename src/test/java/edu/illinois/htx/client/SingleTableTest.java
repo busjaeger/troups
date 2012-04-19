@@ -10,8 +10,8 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Ignore;
 import org.junit.Test;
 
-import edu.illinois.htx.client.transactions.Transaction;
-import edu.illinois.htx.client.transactions.TransactionManager;
+import edu.illinois.htx.client.tm.Transaction;
+import edu.illinois.htx.client.tm.TransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 public class SingleTableTest {
@@ -27,7 +27,7 @@ public class SingleTableTest {
 
     Configuration conf = HBaseConfiguration.create();
     TransactionManager tm = TransactionManager.get(conf);
-    HTXTable table = new HTXTable(conf, tableName);
+    HTable table = new HTable(conf, tableName);
 
     Transaction ta = tm.begin();
     try {

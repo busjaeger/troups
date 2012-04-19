@@ -7,8 +7,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
+import java.util.Queue;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
@@ -89,6 +91,7 @@ import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
  * removed finalized transactions
  * <li>refactor to clearly separate: local transaction processing, distributed
  * transactions processing, and concurrency control policy
+ * <li>follow up with HBase dev team to get get/put failed notifiers
  * 
  * </ol>
  */
@@ -110,7 +113,9 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   // TAs indexed by key and versions read for efficient conflict detection
   private final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> readers;
   // TAs indexed by key currently being written for efficient conflict detection
-  private final Map<K, NavigableSet<MVTOTransaction<K>>> writers;
+  private final Map<K, NavigableSet<MVTOTransaction<K>>> activeWriters;
+  // sequence of reading and finalized transactions to synchronize TA removal
+  private final Queue<MVTOTransaction<K>> activeReaders;
   // lock protect the previous two conflict detection data structures
   private final ConcurrentMap<Key, Lock> keyLocks = new ConcurrentHashMap<Key, Lock>();
   // flag to indicate whether this TM is running
@@ -125,7 +130,8 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     this.timestampManager = timestampManager;
     this.transactions = new TreeMap<Long, MVTOTransaction<K>>();
     this.readers = new HashMap<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
-    this.writers = new HashMap<K, NavigableSet<MVTOTransaction<K>>>();
+    this.activeWriters = new HashMap<K, NavigableSet<MVTOTransaction<K>>>();
+    this.activeReaders = new ConcurrentLinkedQueue<MVTOTransaction<K>>();
   }
 
   public KeyValueStore<K> getKeyValueStore() {
@@ -177,7 +183,14 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   }
 
   @Override
-  public void beforeRead(long tid, Iterable<? extends K> keys) {
+  public void beforeRead(long tid, final Iterable<? extends K> keys)
+      throws IOException {
+    new WithReadLock() {
+      @Override
+      void execute(MVTOTransaction<K> ta) throws IOException {
+        ta.beforeRead(keys);
+      }
+    }.run(tid);
   }
 
   /**
@@ -309,6 +322,12 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
       keyLock.unlock();
   }
 
+  void addTransaction(MVTOTransaction<K> ta) {
+    synchronized (transactions) {
+      transactions.put(ta.getID(), ta);
+    }
+  }
+
   /**
    * Get the transaction object for the given timestamp
    * 
@@ -321,18 +340,6 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     }
   }
 
-  void addTransaction(MVTOTransaction<K> ta) {
-    synchronized (transactions) {
-      transactions.put(ta.getID(), ta);
-    }
-  }
-
-  MVTOTransaction<K> removeTransaction(MVTOTransaction<K> ta) {
-    synchronized (transactions) {
-      return transactions.remove(ta.getID());
-    }
-  }
-
   Iterable<MVTOTransaction<K>> getTransactions() {
     List<MVTOTransaction<K>> snapshot;
     synchronized (transactions) {
@@ -341,21 +348,13 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     return snapshot;
   }
 
-  // must be called with key lock held
-  NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> getReaders(K key) {
-    synchronized (readers) {
-      return readers.get(key);
+  MVTOTransaction<K> removeTransaction(MVTOTransaction<K> ta) {
+    synchronized (transactions) {
+      return transactions.remove(ta.getID());
     }
   }
 
-  /**
-   * Indexes the read for efficient conflict detection. Caller must hold key
-   * lock.
-   * 
-   * @param reader
-   * @param key
-   * @param version
-   */
+  // must be called with key lock held
   void addReader(K key, long version, MVTOTransaction<K> reader) {
     NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions;
     synchronized (readers) {
@@ -370,6 +369,14 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
     readers.add(reader);
   }
 
+  // must be called with key lock held
+  NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> getReaders(K key) {
+    synchronized (readers) {
+      return readers.get(key);
+    }
+  }
+
+  // must be called with key lock held
   void removeReader(Key key, long version, MVTOTransaction<K> reader) {
     synchronized (readers) {
       NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = readers
@@ -389,33 +396,41 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   }
 
   // must hold key lock to call this method
-  void addWriter(K key, MVTOTransaction<K> writer) {
+  void addActiveWriter(K key, MVTOTransaction<K> writer) {
     NavigableSet<MVTOTransaction<K>> writes;
-    synchronized (writers) {
-      writes = writers.get(key);
+    synchronized (activeWriters) {
+      writes = activeWriters.get(key);
       if (writes == null)
-        writers.put(key, writes = new TreeSet<MVTOTransaction<K>>());
+        activeWriters.put(key, writes = new TreeSet<MVTOTransaction<K>>());
     }
     writes.add(writer);
   }
 
   // must hold key lock to call this method
-  NavigableSet<MVTOTransaction<K>> getWriters(K key) {
-    synchronized (writers) {
-      return writers.get(key);
+  NavigableSet<MVTOTransaction<K>> getActiveWriters(K key) {
+    synchronized (activeWriters) {
+      return activeWriters.get(key);
     }
   }
 
   // must hold key lock to call this method
-  void removeWriter(Key key, MVTOTransaction<K> writer) {
-    synchronized (writers) {
-      NavigableSet<MVTOTransaction<K>> writes = writers.get(key);
+  void removeActiveWriter(Key key, MVTOTransaction<K> writer) {
+    synchronized (activeWriters) {
+      NavigableSet<MVTOTransaction<K>> writes = activeWriters.get(key);
       if (writes != null) {
         writes.remove(writer);
         if (writes.isEmpty())
-          writers.remove(key);
+          activeWriters.remove(key);
       }
     }
+  }
+
+  void addActiveReader(MVTOTransaction<K> ta) {
+    activeReaders.add(ta);
+  }
+
+  void removeActiveReader(MVTOTransaction<K> ta) {
+    activeReaders.remove(ta);
   }
 
   // garbage collection
@@ -438,9 +453,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
         } catch (IOException e) {
           e.printStackTrace();
         }
-        if (ta.getState() == State.FINALIZED)
-          removeTransaction(ta);
-        return;
+        break;
       case ABORTED:
       case COMMITTED:
         break;
@@ -450,7 +463,12 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord<K>>
          * before this one have completed
          */
         ta.removeReads();
-        removeTransaction(ta);
+        for (MVTOTransaction<?> other : activeReaders) {
+          if (other.getState() != State.FINALIZED)
+            break;
+          if (other.equals(ta))
+            removeTransaction(ta);
+        }
         break;
       }
     }

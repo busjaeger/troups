@@ -1,4 +1,4 @@
-package edu.illinois.htx.regionserver;
+package edu.illinois.htx.tm.region;
 
 import org.apache.hadoop.hbase.ipc.CoprocessorProtocol;
 

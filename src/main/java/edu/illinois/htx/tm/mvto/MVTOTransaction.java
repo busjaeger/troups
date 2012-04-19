@@ -112,23 +112,19 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     removeReadBy();
 
     /*
-     * permanently remove all rows deleted by this transaction
+     * permanently remove all rows deleted by this transaction so we don't have
+     * to continue to filter them after the TA is done
      */
-    for (Iterator<Entry<K, Boolean>> it = writes.entrySet().iterator(); it
-        .hasNext();) {
-      Entry<K, Boolean> e = it.next();
-      // remove deletes from data store so we don't have to keep this
-      // transaction around to filter reads
-      if (e.getValue())
+    for (Entry<K, Boolean> write : writes.entrySet())
+      if (write.getValue())
         try {
-          tm.getKeyValueStore().deleteVersions(e.getKey(), id);
-        } catch (IOException e1) {
-          e1.printStackTrace();
+          tm.getKeyValueStore().deleteVersions(write.getKey(), id);
+        } catch (IOException e) {
+          // could retry a couple times
+          e.printStackTrace();
           return;
         }
-      // writes were only kept around in case this TA aborts
-      it.remove();
-    }
+
     // logging once is sufficient, since delete operation idempotent
     getTransactionLog().append(Type.FINALIZE, id);
     setState(FINALIZED);
@@ -178,7 +174,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     // remove any writes in progress and cleanup data store
     for (Iterator<K> it = writes.keySet().iterator(); it.hasNext();) {
       K key = it.next();
-      tm.removeWriter(key, this);
+      tm.removeActiveWriter(key, this);
       try {
         tm.getKeyValueStore().deleteVersion(key, id);
       } catch (IOException e) {
@@ -197,6 +193,20 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     getTimestampManager().delete(id);
   }
 
+  public final synchronized void beforeRead(Iterable<? extends K> keys) {
+    switch (state) {
+    case ACTIVE:
+      break;
+    case CREATED:
+    case ABORTED:
+    case BLOCKED:
+    case COMMITTED:
+    case FINALIZED:
+      throw newISA("read");
+    }
+    tm.addActiveReader(this);
+  }
+
   public final synchronized void afterRead(
       Iterable<? extends KeyVersions<K>> kvs) throws IOException {
     switch (state) {
@@ -210,6 +220,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       throw newISA("read");
     }
 
+    tm.removeActiveReader(this);
     for (KeyVersions<K> kv : kvs) {
       K key = kv.getKey();
       tm.lock(key);
@@ -255,7 +266,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
            * transaction had already read the older value, the writer would have
            * never been admitted)
            */
-          NavigableSet<MVTOTransaction<K>> writes = tm.getWriters(key);
+          NavigableSet<MVTOTransaction<K>> writes = tm.getActiveWriters(key);
           if (writes != null) {
             MVTOTransaction<K> lastWrite = writes.lower(this);
             if (lastWrite != null && lastWrite.getID() > version) {
@@ -327,7 +338,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
         /*
          * Add write in progress, so readers can check if they see the version
          */
-        tm.addWriter(key, this);
+        tm.addActiveWriter(key, this);
 
       } finally {
         tm.unlock(key);
@@ -344,7 +355,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          * Remove write in progress, since we can be sure now it is present in
          * the data store
          */
-        tm.removeWriter(key, this);
+        tm.removeActiveWriter(key, this);
       } finally {
         tm.unlock(key);
       }
@@ -431,8 +442,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   synchronized void removeReadFrom(MVTOTransaction<K> ta) {
     assert ta.state == COMMITTED;
-    readFrom.remove(ta);
-    if (readFrom.isEmpty())
+    if (readFrom.remove(ta) && readFrom.isEmpty())
       notify();
   }
 
@@ -449,10 +459,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   synchronized void removeReadBy() {
-    for (Iterator<MVTOTransaction<K>> it = readBy.iterator(); it.hasNext();) {
-      it.next().removeReadFrom(this);
-      it.remove();
-    }
+    for (MVTOTransaction<K> ta : readBy)
+      ta.removeReadFrom(this);
   }
 
   synchronized void addRead(K key, long version) {
@@ -460,17 +468,14 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   synchronized void removeReads() {
-    for (Iterator<Entry<K, Long>> it = reads.entrySet().iterator(); it
-        .hasNext();) {
-      Entry<K, Long> e = it.next();
-      K key = e.getKey();
+    for (Entry<K, Long> read : reads.entrySet()) {
+      K key = read.getKey();
       tm.lock(key);
       try {
-        tm.removeReader(key, e.getValue(), this);
+        tm.removeReader(key, read.getValue(), this);
       } finally {
         tm.unlock(key);
       }
-      it.remove();
     }
   }
 

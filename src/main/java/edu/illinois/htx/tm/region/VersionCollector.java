@@ -1,4 +1,4 @@
-package edu.illinois.htx.regionserver;
+package edu.illinois.htx.tm.region;
 
 import java.io.IOException;
 import java.util.List;

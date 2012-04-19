@@ -6,23 +6,22 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.htx.HTXConstants;
-import edu.illinois.htx.client.transactions.Transaction;
+import edu.illinois.htx.client.tm.Transaction;
 
-public class HTXTable implements Closeable {
+public class HTable implements Closeable {
 
-  final HTable hTable;
+  final org.apache.hadoop.hbase.client.HTable hTable;
 
-  public HTXTable(Configuration conf, byte[] tableName) throws IOException {
-    this.hTable = new HTable(conf, tableName);
+  public HTable(Configuration conf, byte[] tableName) throws IOException {
+    this.hTable = new org.apache.hadoop.hbase.client.HTable(conf, tableName);
   }
 
-  public HTXTable(Configuration conf, String tableName) throws IOException {
-    this.hTable = new HTable(conf, tableName);
+  public HTable(Configuration conf, String tableName) throws IOException {
+    this.hTable = new org.apache.hadoop.hbase.client.HTable(conf, tableName);
   }
 
   public Result get(Transaction ta, Get get) throws IOException {
@@ -42,7 +41,7 @@ public class HTXTable implements Closeable {
   }
 
   public void put(Transaction ta, Put put) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = createTransactionPut(put, ta);
+    org.apache.hadoop.hbase.client.Put hPut = newPut(put, ta);
     for (List<KeyValue> kvl : put.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), kv.getValue());
@@ -57,7 +56,7 @@ public class HTXTable implements Closeable {
    * marker that is interpreted by our Coprocessor.
    */
   public void delete(Transaction ta, Delete delete) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = createTransactionPut(delete, ta);
+    org.apache.hadoop.hbase.client.Put hPut = newPut(delete, ta);
     hPut.setAttribute(HTXConstants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
@@ -65,7 +64,7 @@ public class HTXTable implements Closeable {
     hTable.put(hPut);
   }
 
-  private org.apache.hadoop.hbase.client.Put createTransactionPut(
+  private org.apache.hadoop.hbase.client.Put newPut(
       Mutation mutation, Transaction ta) throws IOException {
     byte[] row = mutation.getRow();
     long tid = ta.enlist(hTable, row);

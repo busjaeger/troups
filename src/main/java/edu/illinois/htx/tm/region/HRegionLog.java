@@ -1,4 +1,4 @@
-package edu.illinois.htx.regionserver;
+package edu.illinois.htx.tm.region;
 
 import static edu.illinois.htx.HTXConstants.DEFAULT_TM_LOG_TABLE_FAMILY_NAME;
 import static edu.illinois.htx.HTXConstants.DEFAULT_TM_LOG_TABLE_NAME;

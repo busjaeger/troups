@@ -1,4 +1,4 @@
-package edu.illinois.htx.regionserver;
+package edu.illinois.htx.tm.region;
 
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
@@ -13,6 +13,8 @@ import org.apache.hadoop.hbase.KeyValue;
 import org.junit.Test;
 
 import edu.illinois.htx.tm.KeyVersions;
+import edu.illinois.htx.tm.region.HKey;
+import edu.illinois.htx.tm.region.HRegionTransactionManager;
 
 public class HRegionTransactionManagerTest {
 

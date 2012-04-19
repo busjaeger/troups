@@ -1,4 +1,7 @@
-package edu.illinois.htx.client.transactions.impl;
+package edu.illinois.htx.client.tm.impl;
+
+import static edu.illinois.htx.HTXConstants.DEFAULT_TM_CLIENT_THREAD_COUNT;
+import static edu.illinois.htx.HTXConstants.TM_CLIENT_THREAD_COUNT;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -9,8 +12,8 @@ import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 
-import edu.illinois.htx.client.transactions.Transaction;
-import edu.illinois.htx.client.transactions.TransactionManager;
+import edu.illinois.htx.client.tm.Transaction;
+import edu.illinois.htx.client.tm.TransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.zk.ZKSharedTimestampManager;
@@ -19,15 +22,15 @@ public class TransactionManagerImpl extends TransactionManager {
 
   private final SharedTimestampManager stsm;
   private final ExecutorService pool;
-  private final Configuration conf;
 
   public TransactionManagerImpl(Configuration conf) throws IOException {
     HConnection connection = HConnectionManager.getConnection(conf);
     @SuppressWarnings("deprecation")
     ZooKeeperWatcher zkw = connection.getZooKeeperWatcher();
-    this.conf = conf;
     this.stsm = new ZKSharedTimestampManager(zkw);
-    this.pool = Executors.newCachedThreadPool();
+    int numThreads = conf.getInt(TM_CLIENT_THREAD_COUNT,
+        DEFAULT_TM_CLIENT_THREAD_COUNT);
+    this.pool = Executors.newFixedThreadPool(numThreads);
   }
 
   public Transaction begin() {
@@ -35,7 +38,7 @@ public class TransactionManagerImpl extends TransactionManager {
   }
 
   public Transaction beginXG() {
-    XGTransaction tran = new XGTransaction(stsm, pool, conf);
+    XGTransaction tran = new XGTransaction(stsm, pool);
     try {
       tran.begin();
     } catch (IOException e) {

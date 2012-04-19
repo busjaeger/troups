@@ -1,4 +1,4 @@
-package edu.illinois.htx.client.transactions.impl;
+package edu.illinois.htx.client.tm.impl;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -11,14 +11,12 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.util.ReflectionUtils;
 
-import edu.illinois.htx.client.transactions.RowBasedSplitPolicy;
-import edu.illinois.htx.client.transactions.Transaction;
-import edu.illinois.htx.regionserver.RTM;
+import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.region.HRegionTransactionManager;
+import edu.illinois.htx.tm.region.RTM;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
@@ -31,18 +29,15 @@ class XGTransaction implements Transaction, TimestampListener {
   // immutable state
   private final SharedTimestampManager stsm;
   private final ExecutorService pool;
-  private final Configuration conf;
 
   // mutable state
   private long id;
   private final Map<RowGroup, Long> groups = new HashMap<RowGroup, Long>();
   private State state;
 
-  XGTransaction(SharedTimestampManager tsm, ExecutorService pool,
-      Configuration conf) {
+  XGTransaction(SharedTimestampManager tsm, ExecutorService pool) {
     this.stsm = tsm;
     this.pool = pool;
-    this.conf = conf;
     this.state = State.CREATED;
   }
 
@@ -72,25 +67,8 @@ class XGTransaction implements Transaction, TimestampListener {
       throw newISA("enlist");
     }
 
-    // by default each row becomes its own group
-    byte[] rootRow = row;
-    String rspClass = table.getTableDescriptor()
-        .getRegionSplitPolicyClassName();
-    if (rspClass != null) {
-      try {
-        Class<?> cls = Class.forName(rspClass);
-        if (RowBasedSplitPolicy.class.isAssignableFrom(cls)) {
-          @SuppressWarnings("unchecked")
-          Class<? extends RowBasedSplitPolicy> rspCls = (Class<? extends RowBasedSplitPolicy>) cls;
-          RowBasedSplitPolicy rsp = ReflectionUtils.newInstance(rspCls, conf);
-          // if a row-based split policy is set, determine actual row
-          rootRow = rsp.getRootRow(row);
-        }
-      } catch (ClassNotFoundException e) {
-        // ignore
-      }
-    }
-
+    // create row group
+    byte[] rootRow = HRegionTransactionManager.getSplitRow(table, row);
     RowGroup group = new RowGroup(table, rootRow);
 
     // this is a new row group -> enlist RTM in transaction
