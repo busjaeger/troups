@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableSet;
 import java.util.NoSuchElementException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -49,6 +50,7 @@ import edu.illinois.htx.tm.TransactionOperationObserver;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.ObservingTransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.XATransactionManager;
 import edu.illinois.htx.tm.mvto.XAMVTOTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
 import edu.illinois.htx.tsm.zk.TimestampReclaimer;
@@ -60,6 +62,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
 
+  private final List<LifecycleListener> lifecycleListeners = new CopyOnWriteArrayList<LifecycleListener>();
+  private final List<TransactionOperationObserver<HKey>> observers = new CopyOnWriteArrayList<TransactionOperationObserver<HKey>>();
   private HRegion region;
   private ObservingTransactionManager<HKey> tm;
   private ZKSharedTimestampManager tsm;
@@ -87,7 +91,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     HRegionInfo regionInfo = region.getRegionInfo();
     HConnection connection = env.getRegionServerServices().getCatalogTracker()
         .getConnection();
-    HRegionLog tlog = HRegionLog.newInstance(connection, pool, regionInfo);
+    XAHRegionLog tlog = XAHRegionLog.newInstance(connection, pool, regionInfo);
     tm = new XAMVTOTransactionManager<HKey, HLogRecord>(this, tlog, tsm);
 
     // create timestamp collector
@@ -98,11 +102,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   public void preOpen(ObserverContext<RegionCoprocessorEnvironment> ctx) {
     tsm.addTimestampReclamationListener(this);
     tsm.start();
+    for (LifecycleListener listener : lifecycleListeners)
+      listener.starting();
     try {
-      // 1. start transaction manager
-      tm.start();
-
-      // 2. start collector
       collector.start();
     } catch (IOException e) {
       // either aborts region server or removes co-processor
@@ -113,7 +115,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void preClose(ObserverContext<RegionCoprocessorEnvironment> e,
       boolean abortRequested) {
-    tm.stop(abortRequested);
+    for (LifecycleListener listener : lifecycleListeners)
+      if (abortRequested)
+        listener.aborting();
+      else
+        listener.stopping();
   }
 
   @Override
@@ -128,7 +134,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // create an HKey set view on the family map
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
-    tm.beforePut(tid, isDelete, keys);
+    if (isDelete)
+      tm.beforeDelete(tid, keys);
+    else
+      tm.beforePut(tid, keys);
   }
 
   @Override
@@ -140,7 +149,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
-    tm.beforePut(tid, isDelete, keys);
+    if (isDelete)
+      tm.beforeDelete(tid, keys);
+    else
+      tm.beforePut(tid, keys);
   }
 
   @Override
@@ -197,26 +209,33 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void addTransactionOperationObserver(TransactionOperationObserver<HKey> observer) {
+  public void addTransactionOperationObserver(
+      TransactionOperationObserver<HKey> observer) {
+    observers.add(observer);
   }
 
   @Override
   public void addLifecycleListener(LifecycleListener listener) {
+    this.lifecycleListeners.add(listener);
   }
 
   @Override
   public long begin() throws IOException {
-    return 0;
+    return tm.begin();
   }
 
   @Override
   public long join(long tid) throws IOException {
-    return tm.join(tid);
+    if (tm instanceof XATransactionManager)
+      return ((XATransactionManager) tm).join(tid);
+    throw new IllegalStateException("distributed transactions not enabled");
   }
 
   @Override
   public void prepare(long tid) throws IOException {
-    tm.prepare(tid);
+    if (tm instanceof XATransactionManager)
+      ((XATransactionManager) tm).prepare(tid);
+    throw new IllegalStateException("distributed transactions not enabled");
   }
 
   @Override
