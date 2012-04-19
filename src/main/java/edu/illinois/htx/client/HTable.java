@@ -9,7 +9,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import edu.illinois.htx.HTXConstants;
+import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.Transaction;
 
 public class HTable implements Closeable {
@@ -57,7 +57,7 @@ public class HTable implements Closeable {
    */
   public void delete(Transaction ta, Delete delete) throws IOException {
     org.apache.hadoop.hbase.client.Put hPut = newPut(delete, ta);
-    hPut.setAttribute(HTXConstants.ATTR_NAME_DEL, Bytes.toBytes(true));
+    hPut.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);
@@ -76,7 +76,7 @@ public class HTable implements Closeable {
 
   private static void setTransaction(OperationWithAttributes operation, long tid) {
     byte[] tsBytes = Bytes.toBytes(tid);
-    operation.setAttribute(HTXConstants.ATTR_NAME_TID, tsBytes);
+    operation.setAttribute(Constants.ATTR_NAME_TID, tsBytes);
   }
 
   @Override

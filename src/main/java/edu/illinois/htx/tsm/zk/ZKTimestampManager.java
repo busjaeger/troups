@@ -1,11 +1,11 @@
 package edu.illinois.htx.tsm.zk;
 
-import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
-import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_LRT;
-import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMPS;
-import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_BASE;
-import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_LRT;
-import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_TIMESTAMPS;
+import static edu.illinois.htx.Constants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
+import static edu.illinois.htx.Constants.DEFAULT_ZOOKEEPER_ZNODE_LRT;
+import static edu.illinois.htx.Constants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMPS;
+import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_BASE;
+import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_LRT;
+import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_TIMESTAMPS;
 import static edu.illinois.htx.tsm.zk.Util.createWithParents;
 import static edu.illinois.htx.tsm.zk.Util.getId;
 import static edu.illinois.htx.tsm.zk.Util.join;
@@ -47,14 +47,14 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     super(zkw);
     this.listeners = new CopyOnWriteArrayList<TimestampReclamationListener>();
     Configuration conf = zkw.getConfiguration();
-    String htx = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
+    String base = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
     String timestamps = conf.get(ZOOKEEPER_ZNODE_TIMESTAMPS,
         DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMPS);
     String lrt = conf.get(ZOOKEEPER_ZNODE_LRT, DEFAULT_ZOOKEEPER_ZNODE_LRT);
-    String htxNode = join(zkw.baseZNode, htx);
-    this.timestampsNode = join(htxNode, timestamps);
+    String baseNode = join(zkw.baseZNode, base);
+    this.timestampsNode = join(baseNode, timestamps);
     this.timestampsDir = Util.toDir(timestampsNode);
-    this.lrtNode = join(htxNode, lrt);
+    this.lrtNode = join(baseNode, lrt);
   }
 
   public void start() {

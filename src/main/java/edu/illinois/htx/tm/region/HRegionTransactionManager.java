@@ -1,7 +1,7 @@
 package edu.illinois.htx.tm.region;
 
-import static edu.illinois.htx.HTXConstants.DEFAULT_TM_THREAD_COUNT;
-import static edu.illinois.htx.HTXConstants.TM_THREAD_COUNT;
+import static edu.illinois.htx.Constants.DEFAULT_TM_THREAD_COUNT;
+import static edu.illinois.htx.Constants.TM_THREAD_COUNT;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -41,11 +41,13 @@ import org.apache.hadoop.util.ReflectionUtils;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
-import edu.illinois.htx.HTXConstants;
+import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.RowGroupSplitPolicy;
 import edu.illinois.htx.tm.KeyValueStore;
-import edu.illinois.htx.tm.KeyValueStoreObserver;
+import edu.illinois.htx.tm.LifecycleListener;
+import edu.illinois.htx.tm.TransactionOperationObserver;
 import edu.illinois.htx.tm.KeyVersions;
+import edu.illinois.htx.tm.ObservingTransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.mvto.XAMVTOTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
@@ -59,7 +61,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       .getComparatorIgnoringTimestamps();
 
   private HRegion region;
-  private XAMVTOTransactionManager<HKey, HLogRecord> tm;
+  private ObservingTransactionManager<HKey> tm;
   private ZKSharedTimestampManager tsm;
   private ScheduledExecutorService pool;
   private TimestampReclaimer collector;
@@ -109,7 +111,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void postClose(ObserverContext<RegionCoprocessorEnvironment> e,
+  public void preClose(ObserverContext<RegionCoprocessorEnvironment> e,
       boolean abortRequested) {
     tm.stop(abortRequested);
   }
@@ -122,11 +124,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       return;
     if (put.getTimeStamp() != tid)
       throw new IllegalArgumentException("timestamp does not match tid");
-    boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
+    boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     // create an HKey set view on the family map
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
-    tm.beforeWrite(tid, isDelete, keys);
+    tm.beforePut(tid, isDelete, keys);
   }
 
   @Override
@@ -135,10 +137,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Long tid = getTID(put);
     if (tid == null)
       return;
-    boolean isDelete = getBoolean(put, HTXConstants.ATTR_NAME_DEL);
+    boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
-    tm.beforeWrite(tid, isDelete, keys);
+    tm.beforePut(tid, isDelete, keys);
   }
 
   @Override
@@ -153,7 +155,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
           "timerange does not match tid: (expected: " + new TimeRange(0L, tid)
               + "), (actual: " + tr);
     Iterable<HKey> keys = transform(get.getRow(), get.getFamilyMap());
-    tm.beforeRead(tid, keys);
+    tm.beforeGet(tid, keys);
   }
 
   @Override
@@ -166,7 +168,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);
     Iterable<KeyVersions<HKey>> kvs = transform(results);
-    tm.afterRead(tid, kvs);
+    tm.afterGet(tid, kvs);
   }
 
   @Override
@@ -195,7 +197,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public void addObserver(KeyValueStoreObserver<HKey> observer) {
+  public void addTransactionOperationObserver(TransactionOperationObserver<HKey> observer) {
+  }
+
+  @Override
+  public void addLifecycleListener(LifecycleListener listener) {
   }
 
   @Override
@@ -242,7 +248,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   private static Long getTID(OperationWithAttributes operation) {
-    byte[] tsBytes = operation.getAttribute(HTXConstants.ATTR_NAME_TID);
+    byte[] tsBytes = operation.getAttribute(Constants.ATTR_NAME_TID);
     return tsBytes == null ? null : Bytes.toLong(tsBytes);
   }
 
@@ -394,4 +400,5 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // by default each row is it's own row group
     return row;
   }
+
 }

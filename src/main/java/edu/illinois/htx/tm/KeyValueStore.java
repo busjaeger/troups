@@ -2,6 +2,9 @@ package edu.illinois.htx.tm;
 
 import java.io.IOException;
 
+/**
+ * defines only the minimal interface needed by the transaction manager
+ */
 public interface KeyValueStore<K extends Key> {
 
   /**
@@ -23,10 +26,8 @@ public interface KeyValueStore<K extends Key> {
    */
   void deleteVersions(K key, long version) throws IOException;
 
-  /**
-   * Adds observer to the key value store
-   * 
-   * @param observer
-   */
-  void addObserver(KeyValueStoreObserver<K> observer);
+  void addTransactionOperationObserver(TransactionOperationObserver<K> observer);
+
+  void addLifecycleListener(LifecycleListener listener);
+
 }

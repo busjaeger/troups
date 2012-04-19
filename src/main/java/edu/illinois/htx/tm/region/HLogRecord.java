@@ -6,32 +6,23 @@ import java.io.IOException;
 
 import org.apache.hadoop.io.Writable;
 
-import edu.illinois.htx.tm.LogRecord;
+import edu.illinois.htx.tm.log.LogRecord;
 
-public class HLogRecord implements LogRecord<HKey>, Writable,
+public abstract class HLogRecord implements LogRecord, Writable,
     Comparable<HLogRecord> {
 
-  private static final int VERSION = 0;
-
+  private transient final int type;
   private long sid;
   private long tid;
-  private Type type;
-  private HKey key;
-  private Long version;
-  private Long pid;
 
-  public HLogRecord() {
-    super();
+  HLogRecord(int type) {
+    this.type = type;
   }
 
-  public HLogRecord(long sid, long tid, Type type, HKey key, Long version,
-      Long pid) {
+  HLogRecord(int type, long sid, long tid) {
+    this(type);
     this.sid = sid;
     this.tid = tid;
-    this.type = type;
-    this.key = key;
-    this.version = version;
-    this.pid = pid;
   }
 
   @Override
@@ -45,23 +36,8 @@ public class HLogRecord implements LogRecord<HKey>, Writable,
   }
 
   @Override
-  public Type getType() {
+  public int getType() {
     return type;
-  }
-
-  @Override
-  public HKey getKey() {
-    return key;
-  }
-
-  @Override
-  public Long getVersion() {
-    return version;
-  }
-
-  @Override
-  public Long getPID() {
-    return pid;
   }
 
   @Override
@@ -71,27 +47,14 @@ public class HLogRecord implements LogRecord<HKey>, Writable,
 
   @Override
   public void write(DataOutput out) throws IOException {
-    out.writeInt(VERSION);
     out.writeLong(sid);
     out.writeLong(tid);
-    out.writeInt(type.ordinal());
-    key.write(out);
-    boolean hasVersion = version != null;
-    out.writeBoolean(hasVersion);
-    if (hasVersion)
-      out.writeLong(version);
   }
 
   @Override
   public void readFields(DataInput in) throws IOException {
-    in.readInt();
     sid = in.readLong();
     tid = in.readLong();
-    type = Type.values()[in.readInt()];
-    key = new HKey();
-    key.readFields(in);
-    if (in.readBoolean())
-      version = in.readLong();
   }
 
 }

@@ -1,11 +1,11 @@
 package edu.illinois.htx.tsm.zk;
 
-import static edu.illinois.htx.HTXConstants.DEFAULT_TM_TSC_INTERVAL;
-import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
-import static edu.illinois.htx.HTXConstants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
-import static edu.illinois.htx.HTXConstants.TM_TSC_INTERVAL;
-import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_BASE;
-import static edu.illinois.htx.HTXConstants.ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
+import static edu.illinois.htx.Constants.DEFAULT_TM_TSC_INTERVAL;
+import static edu.illinois.htx.Constants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
+import static edu.illinois.htx.Constants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
+import static edu.illinois.htx.Constants.TM_TSC_INTERVAL;
+import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_BASE;
+import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
 import static edu.illinois.htx.tsm.zk.Util.join;
 import static edu.illinois.htx.tsm.zk.Util.setWatch;
 import static edu.illinois.htx.tsm.zk.Util.toDir;
@@ -43,10 +43,10 @@ public class TimestampReclaimer implements Runnable {
     this.tsm = tsm;
     this.zkw = zkw;
     this.pool = pool;
-    String htx = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
+    String base = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
     String collectors = conf.get(ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS,
         DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS);
-    this.collectorsNode = join(zkw.baseZNode, htx, collectors);
+    this.collectorsNode = join(zkw.baseZNode, base, collectors);
     this.interval = conf.getLong(TM_TSC_INTERVAL, DEFAULT_TM_TSC_INTERVAL);
   }
 

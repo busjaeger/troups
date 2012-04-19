@@ -1,7 +1,7 @@
 package edu.illinois.htx.client.tm.impl;
 
-import static edu.illinois.htx.HTXConstants.DEFAULT_TM_CLIENT_THREAD_COUNT;
-import static edu.illinois.htx.HTXConstants.TM_CLIENT_THREAD_COUNT;
+import static edu.illinois.htx.Constants.DEFAULT_TM_CLIENT_THREAD_COUNT;
+import static edu.illinois.htx.Constants.TM_CLIENT_THREAD_COUNT;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;

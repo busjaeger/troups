@@ -1,9 +1,9 @@
 package edu.illinois.htx.tm.region;
 
-import static edu.illinois.htx.HTXConstants.DEFAULT_TM_LOG_TABLE_FAMILY_NAME;
-import static edu.illinois.htx.HTXConstants.DEFAULT_TM_LOG_TABLE_NAME;
-import static edu.illinois.htx.HTXConstants.TM_LOG_TABLE_FAMILY_NAME;
-import static edu.illinois.htx.HTXConstants.TM_LOG_TABLE_NAME;
+import static edu.illinois.htx.Constants.DEFAULT_TM_LOG_TABLE_FAMILY_NAME;
+import static edu.illinois.htx.Constants.DEFAULT_TM_LOG_TABLE_NAME;
+import static edu.illinois.htx.Constants.TM_LOG_TABLE_FAMILY_NAME;
+import static edu.illinois.htx.Constants.TM_LOG_TABLE_NAME;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -18,8 +18,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.hbase.TableExistsException;
 import org.apache.hadoop.hbase.client.Delete;
+import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
@@ -27,21 +31,33 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.io.DataInputBuffer;
-import org.apache.hadoop.io.WritableUtils;
+import org.apache.hadoop.io.DataOutputBuffer;
 
-import edu.illinois.htx.tm.Log;
-import edu.illinois.htx.tm.LogRecord.Type;
+import edu.illinois.htx.tm.TransactionState;
+import edu.illinois.htx.tm.log.Log;
+import edu.illinois.htx.tm.log.OperationLogRecord;
+import edu.illinois.htx.tm.log.StateTransitionLogRecord;
 
-// TODO auto-create log table
-public class HRegionLog extends Log<HKey, HLogRecord> {
+public class HRegionLog implements Log<HKey, HLogRecord> {
 
   public static HRegionLog newInstance(HConnection connection,
       ExecutorService pool, HRegionInfo regionInfo) throws IOException {
-    Configuration config = connection.getConfiguration();
-    byte[] tableName = toBytes(config.get(TM_LOG_TABLE_NAME,
+    Configuration conf = connection.getConfiguration();
+    byte[] tableName = toBytes(conf.get(TM_LOG_TABLE_NAME,
         DEFAULT_TM_LOG_TABLE_NAME));
-    byte[] family = toBytes(config.get(TM_LOG_TABLE_FAMILY_NAME,
+    byte[] family = toBytes(conf.get(TM_LOG_TABLE_FAMILY_NAME,
         DEFAULT_TM_LOG_TABLE_FAMILY_NAME));
+    // create log table if necessary
+    HBaseAdmin admin = new HBaseAdmin(conf);
+    if (!admin.tableExists(tableName)) {
+      HTableDescriptor descr = new HTableDescriptor(tableName);
+      descr.addFamily(new HColumnDescriptor(family));
+      try {
+        admin.createTable(descr);
+      } catch (TableExistsException e) {
+        // ignore: concurrent creation
+      }
+    }
     HTable table = new HTable(tableName, connection, pool);
     return new HRegionLog(table, family, pool, regionInfo);
   }
@@ -55,7 +71,7 @@ public class HRegionLog extends Log<HKey, HLogRecord> {
   private final Map<Long, HLogRecord> begins;
 
   HRegionLog(HTable table, byte[] family, ExecutorService pool,
-      HRegionInfo regionInfo) throws IOException {
+      HRegionInfo regionInfo) {
     this.regionInfo = regionInfo;
     this.family = family;
     this.logTable = table;
@@ -73,24 +89,31 @@ public class HRegionLog extends Log<HKey, HLogRecord> {
       NavigableMap<Long, byte[]> cells = result.getMap().get(family)
           .get(regionInfo.getTableName());
       for (byte[] rawRecord : cells.values()) {
-        HLogRecord record = new HLogRecord();
         DataInputBuffer in = new DataInputBuffer();
         in.reset(rawRecord, rawRecord.length);
+        int type = in.readInt();
+        HLogRecord record = create(type);
         record.readFields(in);
         in.close();
         records.add(record);
       }
     }
+    // reconstruct in-memory state
     for (HLogRecord record : records) {
-      switch (record.getType()) {
-      case BEGIN:
-        rows.put(record.getTID(), record.getKey().getRow());
-        break;
-      case FINALIZE:
-        rows.remove(record.getTID());
-        break;
-      default:
-        break;
+      long tid = record.getTID();
+      if (isStarted(record)) {
+        begins.put(record.getTID(), record);
+        continue;
+      }
+      HLogRecord beginRecord = begins.remove(tid);
+      if (beginRecord != null && beginRecord instanceof OperationLogRecord) {
+        @SuppressWarnings("unchecked")
+        OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
+        rows.put(tid, oplr.getKey().getRow());
+      }
+      if (isFinalized(record)) {
+        begins.remove(tid);
+        rows.remove(tid);
       }
     }
     if (!records.isEmpty())
@@ -98,31 +121,80 @@ public class HRegionLog extends Log<HKey, HLogRecord> {
     return records;
   }
 
-  @Override
-  public HLogRecord newRecord(Type type, long tid, HKey key, Long version,
-      Long pid) {
-    return new HLogRecord(sid.getAndIncrement(), tid, type, key, version, pid);
+  protected HLogRecord create(int type) {
+    switch (type) {
+    case Log.RECORD_TYPE_STATE_TRANSITION:
+      return new HStateTransitionLogRecord();
+    case Log.RECORD_TYPE_GET:
+      return new HGetLogRecord();
+    case Log.RECORD_TYPE_DELETE:
+      return new HDeleteLogRecord();
+    case Log.RECORD_TYPE_PUT:
+      return new HPutLogRecord();
+    default:
+      throw new IllegalStateException("Unknown log record type: " + type);
+    }
+  }
+
+  protected long nextSID() {
+    return sid.getAndIncrement();
   }
 
   @Override
-  public void append(HLogRecord record) throws IOException {
+  public long appendStateTransition(long tid, int state) throws IOException {
+    return append(new HStateTransitionLogRecord(nextSID(), tid, state));
+  }
+
+  @Override
+  public long appendGet(long tid, HKey key, long version) throws IOException {
+    return append(new HGetLogRecord(nextSID(), tid, key, version));
+  }
+
+  @Override
+  public long appendPut(long tid, HKey key) throws IOException {
+    return append(new HPutLogRecord(nextSID(), tid, key));
+  }
+
+  @Override
+  public long appendDelete(long tid, HKey key) throws IOException {
+    return append(new HDeleteLogRecord(nextSID(), tid, key));
+  }
+
+  protected long append(HLogRecord record) throws IOException {
+    long tid = record.getTID();
     // don't append begin, because we don't know the row yet
-    if (record.getType() == Type.BEGIN) {
-      begins.put(record.getTID(), record);
-      return;
+    if (isStarted(record)) {
+      begins.put(tid, record);
+      return record.getSID();
     }
 
     List<Put> puts = new ArrayList<Put>(2);
-    HLogRecord beginRecord = begins.remove(record.getTID());
-    if (beginRecord != null) {
-      rows.put(record.getTID(), record.getKey().getRow());
+    HLogRecord beginRecord = begins.remove(tid);
+    if (beginRecord != null && beginRecord instanceof OperationLogRecord) {
+      @SuppressWarnings("unchecked")
+      OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
+      rows.put(tid, oplr.getKey().getRow());
       Put beginPut = newPut(beginRecord);
       puts.add(beginPut);
     }
     puts.add(newPut(record));
     logTable.put(puts);
-    if (record.getType() == Type.FINALIZE)
-      rows.remove(record.getTID());
+
+    if (isFinalized(record)) {
+      begins.remove(tid);
+      rows.remove(tid);
+    }
+    return record.getSID();
+  }
+
+  protected boolean isStarted(HLogRecord record) {
+    return record.getType() == Log.RECORD_TYPE_STATE_TRANSITION
+        && ((StateTransitionLogRecord) record).getTransactionState() == TransactionState.STARTED;
+  }
+
+  protected boolean isFinalized(HLogRecord record) {
+    return record.getType() == Log.RECORD_TYPE_STATE_TRANSITION
+        && ((StateTransitionLogRecord) record).getTransactionState() == TransactionState.FINALIZED;
   }
 
   /*
@@ -150,11 +222,15 @@ public class HRegionLog extends Log<HKey, HLogRecord> {
     return scan;
   }
 
-  private Put newPut(HLogRecord record) {
+  private Put newPut(HLogRecord record) throws IOException {
     byte[] row = rows.get(record.getTID());
     long timestamp = record.getSID();
     byte[] qualifier = regionInfo.getTableName();
-    byte[] value = WritableUtils.toByteArray(record);
+    DataOutputBuffer out = new DataOutputBuffer();
+    out.writeInt(record.getType());
+    record.write(out);
+    out.close();
+    byte[] value = out.getData();
     Put put = new Put(row, timestamp);
     put.add(family, qualifier, value);
     return put;

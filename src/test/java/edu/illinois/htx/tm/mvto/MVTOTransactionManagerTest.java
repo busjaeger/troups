@@ -38,7 +38,7 @@ public class MVTOTransactionManagerTest {
     tsm = new InMemoryTimestampManager();
     tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log,
         tsm);
-    kvs.addObserver(tm);
+    kvs.addTransactionOperationObserver(tm);
     tm.start();
   }
 
@@ -51,25 +51,25 @@ public class MVTOTransactionManagerTest {
     // state in the data store
     StringKey key = new StringKey("x");
     long version = tsm.create();
-    kvs.writeVersion(key, version);
+    kvs.putVersion(key, version);
     tsm.delete(version);
 
     long t1 = tm.begin();
     long t2 = tm.begin();
 
     // both transactions read the initial version
-    kvs.readVersionsObserved(t1, key);
-    kvs.readVersionsObserved(t2, key);
+    kvs.getVersionsObserved(t1, key);
+    kvs.getVersionsObserved(t2, key);
 
     try {
-      kvs.writeVersionObserved(t1, key);
+      kvs.putVersionObserved(t1, key);
       Assert.fail("transaction 1 should have failed write check");
     } catch (TransactionAbortedException e) {
       // expected
     }
 
     try {
-      kvs.writeVersionObserved(t2, key);
+      kvs.putVersionObserved(t2, key);
     } catch (TransactionAbortedException e) {
       e.printStackTrace();
       Assert.fail("tran 2 aborted unexpectedly");
@@ -77,7 +77,7 @@ public class MVTOTransactionManagerTest {
     tm.commit(t2);
 
     // at this point we expect only version 2 of x to be present
-    Iterable<Long> versions = kvs.readVersions(key);
+    Iterable<Long> versions = kvs.getVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(t2), it.next());
@@ -92,12 +92,12 @@ public class MVTOTransactionManagerTest {
     StringKey key = new StringKey("x");
     long version = tsm.create();
     Iterable<StringKey> keys = Arrays.asList(key);
-    kvs.writeVersion(key, version);
+    kvs.putVersion(key, version);
 
     long t1 = tm.begin();
     long t2 = tm.begin();
 
-    Iterable<Long> versions = kvs.readVersionsObserved(t1, key);
+    Iterable<Long> versions = kvs.getVersionsObserved(t1, key);
     tm.beforeWrite(t1, false, keys);
 
     /*
@@ -112,12 +112,12 @@ public class MVTOTransactionManagerTest {
     } catch (TransactionAbortedException e) {
       // expected
     }
-    kvs.writeVersion(key, 1);
+    kvs.putVersion(key, 1);
     tm.afterWrite(t1, false, keys);
     tm.commit(t1);
 
     // at this point we expect only version 2 of x to be present
-    versions = kvs.readVersions(key);
+    versions = kvs.getVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(t1), it.next());
@@ -135,16 +135,16 @@ public class MVTOTransactionManagerTest {
     // state in the data store
     StringKey key = new StringKey("x");
     long version = tsm.create();
-    kvs.writeVersion(key, version);
+    kvs.putVersion(key, version);
 
     final long t1 = tm.begin();
     final long t2 = tm.begin();
 
-    kvs.readVersionsObserved(t1, key);
-    kvs.writeVersionObserved(t1, key);
+    kvs.getVersionsObserved(t1, key);
+    kvs.putVersionObserved(t1, key);
 
-    kvs.readVersionsObserved(t2, key);
-    kvs.writeVersionObserved(t2, key);
+    kvs.getVersionsObserved(t2, key);
+    kvs.putVersionObserved(t2, key);
 
     Callable<Void> commit2 = new Callable<Void>() {
       @Override
@@ -178,7 +178,7 @@ public class MVTOTransactionManagerTest {
     }
 
     // at this point we expect only version 2 of x to be present
-    Iterable<Long> versions = kvs.readVersions(key);
+    Iterable<Long> versions = kvs.getVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(t2), it.next());

@@ -1,27 +1,37 @@
 package edu.illinois.htx.tm.mvto;
 
+import static edu.illinois.htx.tm.XATransactionState.JOINED;
+import static edu.illinois.htx.tm.XATransactionState.PREPARED;
+import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_STATE_TRANSITION;
+import static edu.illinois.htx.tm.log.XALog.RECORD_TYPE_JOIN;
+
 import java.io.IOException;
 
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
-import edu.illinois.htx.tm.Log;
-import edu.illinois.htx.tm.LogRecord;
 import edu.illinois.htx.tm.XATransactionManager;
-import edu.illinois.htx.tm.mvto.MVTOTransaction.State;
-import edu.illinois.htx.tm.mvto.XAMVTOTransaction.XAState;
+import edu.illinois.htx.tm.log.JoinLogRecord;
+import edu.illinois.htx.tm.log.LogRecord;
+import edu.illinois.htx.tm.log.StateTransitionLogRecord;
+import edu.illinois.htx.tm.log.XALog;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 
-public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
+public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
     extends MVTOTransactionManager<K, R> implements XATransactionManager {
 
   public XAMVTOTransactionManager(KeyValueStore<K> keyValueStore,
-      Log<K, R> log, SharedTimestampManager timestampManager) {
+      XALog<K, R> log, SharedTimestampManager timestampManager) {
     super(keyValueStore, log, timestampManager);
   }
 
   @Override
   public SharedTimestampManager getTimestampManager() {
-    return (SharedTimestampManager) super.getTimestampManager();
+    return (SharedTimestampManager) timestampManager;
+  }
+
+  @Override
+  public XALog<K, R> getTransactionLog() {
+    return (XALog<K, R>) transactionLog;
   }
 
   @Override
@@ -51,20 +61,29 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord<K>>
   }
 
   @Override
-  protected void recoverJoin(LogRecord<K> record) {
-    XAMVTOTransaction<K> ta = new XAMVTOTransaction<K>(this);
-    ta.setID(record.getTID());
-    ta.setPID(record.getPID());
-    ta.setSID(record.getSID());
-    ta.setState(State.ACTIVE);
-    ta.setXAState(XAState.JOINED);
-    addTransaction(ta);
+  protected void recover(LogRecord record) {
+    switch (record.getType()) {
+    case RECORD_TYPE_STATE_TRANSITION:
+      StateTransitionLogRecord stlr = (StateTransitionLogRecord) record;
+      switch (stlr.getTransactionState()) {
+      case PREPARED:
+        XAMVTOTransaction<K> ta = (XAMVTOTransaction<K>) getTransaction(record
+            .getTID());
+        ta.setState(PREPARED);
+        return;
+      }
+      break;
+    case RECORD_TYPE_JOIN:
+      JoinLogRecord jlr = (JoinLogRecord) record;
+      XAMVTOTransaction<K> ta = new XAMVTOTransaction<K>(this);
+      ta.setID(jlr.getTID());
+      ta.setPID(jlr.getPID());
+      ta.setSID(jlr.getSID());
+      ta.setState(JOINED);
+      addTransaction(ta);
+      return;
+    }
+    super.recover(record);
   }
 
-  @Override
-  protected void recoverPrepare(LogRecord<K> record) {
-    XAMVTOTransaction<K> ta = (XAMVTOTransaction<K>) getTransaction(record
-        .getTID());
-    ta.setXAState(XAState.PREPARED);
-  }
 }

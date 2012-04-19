@@ -1,6 +1,6 @@
 package edu.illinois.htx;
 
-public interface HTXConstants {
+public interface Constants {
 
   // configuration properties
 

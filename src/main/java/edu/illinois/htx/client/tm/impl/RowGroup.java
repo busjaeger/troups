@@ -8,16 +8,20 @@ import org.apache.hadoop.hbase.util.Bytes;
 class RowGroup {
 
   private final HTable table;
-  private final byte[] rootRow;
-
-  // pre-computed
+  // table name assumed to stay constant for lifetime of instance
   private final byte[] tableName;
+  private final byte[] rootRow;
+  // pre-computed for efficient hashCode() and equals()
   private final int hashCode;
 
   public RowGroup(HTable table, byte[] rootRow) throws IOException {
+    this(table, table.getTableDescriptor().getName(), rootRow);
+  }
+
+  public RowGroup(HTable table, byte[] tableName, byte[] rootRow) {
     this.table = table;
+    this.tableName = tableName;
     this.rootRow = rootRow;
-    this.tableName = table.getTableDescriptor().getName();
     this.hashCode = Bytes.hashCode(tableName) ^ Bytes.hashCode(rootRow);
   }
 
@@ -37,6 +41,8 @@ class RowGroup {
   public boolean equals(Object obj) {
     if (obj instanceof RowGroup) {
       RowGroup o = (RowGroup) obj;
+      if (hashCode != o.hashCode)
+        return false;
       return Bytes.equals(o.tableName, tableName)
           && Bytes.equals(o.rootRow, rootRow);
     }

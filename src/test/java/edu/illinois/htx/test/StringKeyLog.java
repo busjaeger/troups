@@ -4,8 +4,8 @@ import java.io.IOException;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-import edu.illinois.htx.tm.Log;
-import edu.illinois.htx.tm.LogRecord.Type;
+import edu.illinois.htx.tm.log.Log;
+import edu.illinois.htx.tm.log.LogRecord.Log;
 
 public class StringKeyLog extends Log<StringKey, StringKeyLogRecord> {
 

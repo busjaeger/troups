@@ -1,28 +1,34 @@
 package edu.illinois.htx.tm.mvto;
 
-import static edu.illinois.htx.tm.mvto.XAMVTOTransaction.XAState.CREATED;
+import static edu.illinois.htx.tm.TransactionState.ABORTED;
+import static edu.illinois.htx.tm.TransactionState.COMMITTED;
+import static edu.illinois.htx.tm.TransactionState.FINALIZED;
+import static edu.illinois.htx.tm.TransactionState.STARTED;
+import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.CREATED;
+import static edu.illinois.htx.tm.mvto.XAMVTOTransaction.XATransactionState.JOINED;
+import static edu.illinois.htx.tm.mvto.XAMVTOTransaction.XATransactionState.PREPARED;
 
 import java.io.IOException;
 
 import edu.illinois.htx.tm.Key;
-import edu.illinois.htx.tm.LogRecord.Type;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.log.XALog;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
 public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     implements TimestampListener {
 
-  static enum XAState {
-    CREATED, JOINED, PREPARED
+  interface XATransactionState extends InternalTransactionState {
+    public static final int JOINED = 6;
+    public static final int PREPARED = 7;
   }
 
   private long pid;
-  private XAState xaState;
 
   public XAMVTOTransaction(XAMVTOTransactionManager<K, ?> tm) {
     super(tm);
-    xaState = CREATED;
   }
 
   XAMVTOTransactionManager<K, ?> getTM() {
@@ -39,7 +45,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     case CREATED:
       break;
     case ABORTED:
-    case ACTIVE:
+    case STARTED:
     case BLOCKED:
     case COMMITTED:
     case FINALIZED:
@@ -50,15 +56,14 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     setID(id);
     setPID(pid);
     // if we fail here, TSM will clean up reference and client will abort
-    setSID(getTransactionLog().append(Type.JOIN, id, getPID()));
-    setState(State.ACTIVE);
-    setXAState(XAState.JOINED);
+    setSID(getTransactionLog().appendJoinLogRecord(id, pid));
+    setState(JOINED);
   }
 
   public synchronized void prepare() throws TransactionAbortedException,
       IOException {
     switch (state) {
-    case ACTIVE:
+    case STARTED:
       break;
     case CREATED:
     case ABORTED:
@@ -67,16 +72,9 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     case FINALIZED:
       throw newISA("prepare");
     }
-    switch (xaState) {
-    case JOINED:
-      break;
-    case CREATED:
-    case PREPARED:
-      throw newISA("prepare");
-    }
     waitUntilReadFromEmpty();
-    getTransactionLog().append(Type.PREPARE, id);
-    setXAState(XAState.PREPARED);
+    getTransactionLog().appendStateTransition(id, PREPARED);
+    setState(PREPARED);
   }
 
   /**
@@ -92,7 +90,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     case COMMITTED:
     case ABORTED:
       return;
-    case ACTIVE:
+    case STARTED:
     case BLOCKED:
       break;
     case CREATED:
@@ -115,16 +113,12 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     return ((XAMVTOTransactionManager<K, ?>) tm).getTimestampManager();
   }
 
-  synchronized void setXAState(XAState xaState) {
-    this.xaState = xaState;
-  }
-
-  synchronized XAState getXAState() {
-    return xaState;
+  protected XALog<K, ?> getTransactionLog() {
+    return ((XAMVTOTransactionManager<K, ?>) tm).getTransactionLog();
   }
 
   synchronized long getPID() {
-    if (state == State.CREATED)
+    if (state == CREATED)
       throw newISA("getPID");
     return this.pid;
   }

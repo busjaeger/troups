@@ -1,6 +1,6 @@
 package edu.illinois.htx.test;
 
-import edu.illinois.htx.tm.LogRecord;
+import edu.illinois.htx.tm.log.LogRecord;
 
 public class StringKeyLogRecord implements LogRecord<StringKey> {
 
