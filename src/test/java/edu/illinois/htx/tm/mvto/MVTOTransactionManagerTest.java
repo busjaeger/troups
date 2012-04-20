@@ -22,6 +22,7 @@ import edu.illinois.htx.test.StringKeyLogRecord;
 import edu.illinois.htx.test.StringKeyValueStore;
 import edu.illinois.htx.test.StringKeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.impl.MVTOTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager;
 import edu.illinois.htx.tsm.mem.InMemoryTimestampManager;
 

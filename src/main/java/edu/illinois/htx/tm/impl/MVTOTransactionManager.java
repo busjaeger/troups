@@ -1,13 +1,13 @@
-package edu.illinois.htx.tm.mvto;
+package edu.illinois.htx.tm.impl;
 
 import static edu.illinois.htx.tm.TransactionState.ABORTED;
 import static edu.illinois.htx.tm.TransactionState.COMMITTED;
 import static edu.illinois.htx.tm.TransactionState.FINALIZED;
 import static edu.illinois.htx.tm.TransactionState.STARTED;
+import static edu.illinois.htx.tm.impl.LocalTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.impl.LocalTransactionState.CREATED;
 import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_DELETE;
 import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_PUT;
-import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.BLOCKED;
-import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.CREATED;
 
 import java.io.IOException;
 import java.util.ArrayList;

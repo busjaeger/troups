@@ -1,13 +1,13 @@
-package edu.illinois.htx.tm.mvto;
+package edu.illinois.htx.tm.impl;
 
 import static edu.illinois.htx.tm.TransactionState.ABORTED;
 import static edu.illinois.htx.tm.TransactionState.COMMITTED;
 import static edu.illinois.htx.tm.TransactionState.FINALIZED;
 import static edu.illinois.htx.tm.TransactionState.STARTED;
-import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.BLOCKED;
-import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.CREATED;
-import static edu.illinois.htx.tm.mvto.XAMVTOTransaction.XATransactionState.JOINED;
-import static edu.illinois.htx.tm.mvto.XAMVTOTransaction.XATransactionState.PREPARED;
+import static edu.illinois.htx.tm.impl.LocalTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.impl.LocalTransactionState.CREATED;
+import static edu.illinois.htx.tm.impl.XATransactionState.JOINED;
+import static edu.illinois.htx.tm.impl.XATransactionState.PREPARED;
 
 import java.io.IOException;
 
@@ -20,11 +20,6 @@ import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
 public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     implements TimestampListener {
-
-  interface XATransactionState extends InternalTransactionState {
-    public static final int JOINED = 6;
-    public static final int PREPARED = 7;
-  }
 
   private long pid;
 

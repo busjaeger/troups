@@ -1,11 +1,11 @@
-package edu.illinois.htx.tm.mvto;
+package edu.illinois.htx.tm.impl;
 
 import static edu.illinois.htx.tm.TransactionState.ABORTED;
 import static edu.illinois.htx.tm.TransactionState.COMMITTED;
 import static edu.illinois.htx.tm.TransactionState.FINALIZED;
 import static edu.illinois.htx.tm.TransactionState.STARTED;
-import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.BLOCKED;
-import static edu.illinois.htx.tm.mvto.MVTOTransaction.InternalTransactionState.CREATED;
+import static edu.illinois.htx.tm.impl.LocalTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.impl.LocalTransactionState.CREATED;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -20,16 +20,10 @@ import java.util.Set;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tm.TransactionState;
 import edu.illinois.htx.tm.log.Log;
 import edu.illinois.htx.tsm.TimestampManager;
 
 class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
-
-  interface InternalTransactionState extends TransactionState {
-    public static final int CREATED = 5;
-    public static final int BLOCKED = 6;
-  }
 
   // immutable state
   protected final MVTOTransactionManager<K, ?> tm;

@@ -19,7 +19,7 @@ How to install:
 
   <property>
     <name>hbase.coprocessor.region.classes</name>
-    <value>edu.illinois.htx.regionserver.HRegionTransactionManager</value>
+    <value>edu.illinois.htx.region.HRegionTransactionManager</value>
     <description>Installs the HTX coprocessor</description>
   </property>
 
