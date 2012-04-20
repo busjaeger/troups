@@ -51,7 +51,7 @@ class XGTransaction implements Transaction, TimestampListener {
     case COMMITTED:
       throw newISA("begin");
     }
-    id = stsm.create();
+    id = stsm.acquire();
     state = State.ACTIVE;
   }
 
@@ -104,10 +104,10 @@ class XGTransaction implements Transaction, TimestampListener {
     switch (state) {
     case ACTIVE:
       break;
+    case COMMITTING:
     case COMMITTED:
       return;
     case CREATED:
-    case COMMITTING:
     case ABORTED:
       throw newISA("commit");
     }
@@ -122,13 +122,13 @@ class XGTransaction implements Transaction, TimestampListener {
     }
 
     // Phase 2: Commit - all participants have promised to commit
-    state = State.COMMITTING;
     try {
       stsm.persistReferences(id, groups.values());
     } catch (IOException e) {
       rollback();
       throw new TransactionAbortedException(e);
     }
+    state = State.COMMITTING;
 
     /*
      * PONR: after this point the transaction is no longer allowed to fail note:
@@ -176,7 +176,7 @@ class XGTransaction implements Transaction, TimestampListener {
 
     // clean up timestamp (not necessary, but improves performance)
     try {
-      stsm.delete(id);
+      stsm.release(id);
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -186,7 +186,7 @@ class XGTransaction implements Transaction, TimestampListener {
    * ReferenceListener implementation
    */
   @Override
-  public synchronized void deleted(long rid) {
+  public synchronized void released(long rid) {
     switch (state) {
     case ACTIVE:
       break;
@@ -271,7 +271,7 @@ class XGTransaction implements Transaction, TimestampListener {
 
     // clean up timestamp (not necessary, but improves performance)
     try {
-      stsm.delete(id);
+      stsm.release(id);
     } catch (IOException e) {
       e.printStackTrace();
     }

@@ -13,9 +13,9 @@ import org.apache.hadoop.hbase.zookeeper.ZKUtil;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 import org.apache.hadoop.io.WritableUtils;
 import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.KeeperException.NoNodeException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.KeeperException.NoNodeException;
 import org.apache.zookeeper.data.Stat;
 
 import edu.illinois.htx.tsm.NoSuchTimestampException;
@@ -29,8 +29,9 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
     super(zkw);
   }
 
+  // override to create base and child node
   @Override
-  public long createShared() throws IOException {
+  public long acquireShared() throws IOException {
     try {
       while (true) {
         String tranZNode;
@@ -66,7 +67,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
 
   // override to delete recursively
   @Override
-  public boolean delete(long ts) throws IOException {
+  public boolean release(long ts) throws IOException {
     String tranNode = join(timestampsNode, ts);
     try {
       ZKUtil.deleteNodeRecursively(watcher, tranNode);
@@ -76,6 +77,33 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
     } catch (KeeperException e) {
       throw new IOException(e);
     }
+  }
+
+  // override to check owner node and references
+  @Override
+  public boolean isReleased(long ts) throws IOException {
+    String tsNode = join(timestampsNode, ts);
+    try {
+      // if owner exists, the node is not released
+      String owner = getOwnerNode(tsNode);
+      if (ZKUtil.checkExists(watcher, owner) != -1)
+        return true;
+      // otherwise check if persisted references present
+      byte[] data = ZKUtil.getData(watcher, tsNode);
+      if (data == null || data.length == 0)
+        return false;
+      return !new References(data).getRIDs().isEmpty();
+    } catch (KeeperException e) {
+      throw new IOException(e);
+    }
+  }
+
+  @Override
+  public boolean isHeldByCaller(long ts) throws NoSuchTimestampException,
+      IOException {
+    String tsNode = join(timestampsNode, ts);
+    String ownerNode = getOwnerNode(tsNode);
+    return isHeldByCaller(ownerNode);
   }
 
   // override to register listener on owner node and handle persistence logic
@@ -91,7 +119,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
         case NodeDeleted:
           try {
             if (!isPersistent(ts))
-              listener.deleted(ts);
+              listener.released(ts);
           } catch (IOException e) {
             e.printStackTrace();
             // ignore
@@ -109,21 +137,12 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
     String tsNode = join(timestampsNode, ts);
 
     // check if this call is issued by the owner
-    String ownerNode = getOwnerNode(tsNode);
-    Stat stat = new Stat();
-    byte[] data;
-    try {
-      data = ZKUtil.getDataAndWatch(watcher, ownerNode, stat);
-    } catch (KeeperException e) {
-      throw new IOException(e);
-    }
-    long sessionId = watcher.getRecoverableZooKeeper().getSessionId();
-    if (data == null || stat.getEphemeralOwner() != sessionId)
+    if (!isHeldByCaller(ts))
       throw new NotOwnerException();
 
     // now persist references
     References references = new References(rids);
-    data = WritableUtils.toByteArray(references);
+    byte[] data = WritableUtils.toByteArray(references);
     try {
       ZKUtil.setData(watcher, tsNode, data);
     } catch (NoNodeException e) {
@@ -152,30 +171,10 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
   }
 
   @Override
-  public boolean hasReferences(long ts) throws NoSuchTimestampException,
-      IOException {
-    String tsNode = join(timestampsNode, ts);
+  public long acquireReference(long ts) throws IOException {
+    String tsDir = Util.join(timestampsNode, ts, "");
     try {
-      byte[] data = ZKUtil.getData(watcher, tsNode);
-      // deleted node
-      if (data == null)
-        throw new NoSuchTimestampException(tsNode);
-      // non-persistent node (shared or not shared)
-      if (data.length == 0) {
-        String owner = getOwnerNode(tsNode);
-        return ZKUtil.checkExists(watcher, owner) == -1;
-      }
-      return !new References(data).getRIDs().isEmpty();
-    } catch (KeeperException e) {
-      throw new IOException(e);
-    }
-  }
-
-  @Override
-  public long createReference(long ts) throws IOException {
-    String tranDir = Util.join(timestampsNode, ts, "");
-    try {
-      String partNode = Util.create(watcher, tranDir, new byte[0],
+      String partNode = Util.create(watcher, tsDir, new byte[0],
           EPHEMERAL_SEQUENTIAL);
       return getId(partNode);
     } catch (KeeperException.NoNodeException e) {
@@ -215,7 +214,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
         }
       }
     } catch (KeeperException.NoNodeException e) {
-      throw new NoSuchTimestampException(e);
+      return false;
     } catch (KeeperException e) {
       throw new IOException(e);
     }
@@ -229,6 +228,30 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
       throw new IOException(e);
     }
     return removed;
+  }
+
+  @Override
+  public boolean isReferenceHeldByMe(long ts, long rid)
+      throws NoSuchTimestampException, IOException {
+    String tsNode = join(timestampsNode, ts);
+    String refNode = join(tsNode, rid);
+    return isHeldByCaller(refNode);
+  }
+
+  @Override
+  public boolean isReferencePersisted(long ts, long rid)
+      throws NoSuchTimestampException, IOException {
+    String tsNode = join(timestampsNode, ts);
+    try {
+      byte[] data = ZKUtil.getData(watcher, tsNode);
+      if (data == null)
+        throw new NoSuchTimestampException(String.valueOf(ts));
+      if (data.length == 0)
+        return false;
+      return new References(data).getRIDs().contains(rid);
+    } catch (KeeperException e) {
+      throw new IOException(e);
+    }
   }
 
   protected String getOwnerNode(String tsNode) {

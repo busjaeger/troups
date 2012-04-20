@@ -13,7 +13,7 @@ public interface SharedTimestampManager extends TimestampManager {
    * @return
    * @throws IOException
    */
-  long createShared() throws IOException;
+  long acquireShared() throws IOException;
 
   /**
    * Creates a new reference and returns the unique identifier of the reference
@@ -22,7 +22,7 @@ public interface SharedTimestampManager extends TimestampManager {
    * @return
    * @throws IOException
    */
-  long createReference(long ts) throws NoSuchTimestampException, IOException;
+  long acquireReference(long ts) throws NoSuchTimestampException, IOException;
 
   /**
    * 
@@ -33,6 +33,12 @@ public interface SharedTimestampManager extends TimestampManager {
    * @throws IOException
    */
   boolean releaseReference(long ts, long rid) throws IOException;
+
+  boolean isReferenceHeldByMe(long ts, long rid)
+      throws NoSuchTimestampException, IOException;
+
+  boolean isReferencePersisted(long ts, long rid)
+      throws NoSuchTimestampException, IOException;
 
   /**
    * Must be called by owner. Persists the references to the shared timestamp so

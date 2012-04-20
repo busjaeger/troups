@@ -62,7 +62,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   }
 
   @Override
-  public long create() throws IOException {
+  public long acquire() throws IOException {
     try {
       String tsNode = createWithParents(watcher, timestampsDir, new byte[0],
           EPHEMERAL_SEQUENTIAL);
@@ -76,7 +76,39 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   }
 
   @Override
-  public boolean delete(long ts) throws NoSuchTimestampException, IOException {
+  public boolean isReleased(long ts) throws IOException {
+    String tsNode = join(timestampsNode, ts);
+    try {
+      return ZKUtil.checkExists(watcher, tsNode) == -1;
+    } catch (KeeperException e) {
+      throw new IOException(e);
+    }
+  }
+
+  @Override
+  public boolean isHeldByCaller(long ts) throws NoSuchTimestampException,
+      IOException {
+    String tsNode = join(timestampsNode, ts);
+    return isHeldByCaller(tsNode);
+  }
+
+  protected boolean isHeldByCaller(String node)
+      throws NoSuchTimestampException, IOException {
+    Stat stat = new Stat();
+    byte[] data;
+    try {
+      data = ZKUtil.getDataNoWatch(watcher, node, stat);
+    } catch (KeeperException e) {
+      throw new IOException(e);
+    }
+    if (data == null)
+      throw new NoSuchTimestampException(node);
+    long sessionId = watcher.getRecoverableZooKeeper().getSessionId();
+    return stat.getEphemeralOwner() == sessionId;
+  }
+
+  @Override
+  public boolean release(long ts) throws NoSuchTimestampException, IOException {
     String tsNode = join(timestampsNode, ts);
     try {
       ZKUtil.deleteNode(watcher, tsNode);
@@ -112,7 +144,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
       public void process(WatchedEvent event) {
         switch (event.getType()) {
         case NodeDeleted:
-          listener.deleted(ts);
+          listener.released(ts);
         default:
           break;
         }
@@ -135,12 +167,6 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   public void addTimestampReclamationListener(
       TimestampReclamationListener listener) {
     listeners.add(listener);
-  }
-
-  @Override
-  public boolean hasReferences(long ts) throws NoSuchTimestampException,
-      IOException {
-    return false;
   }
 
   @Override

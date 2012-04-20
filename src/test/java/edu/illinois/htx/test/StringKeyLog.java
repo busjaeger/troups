@@ -1,41 +1,40 @@
 package edu.illinois.htx.test;
 
 import java.io.IOException;
-import java.util.NavigableMap;
-import java.util.TreeMap;
+import java.util.Collections;
 
 import edu.illinois.htx.tm.log.Log;
-import edu.illinois.htx.tm.log.LogRecord.Log;
 
-public class StringKeyLog extends Log<StringKey, StringKeyLogRecord> {
+public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
 
-  private NavigableMap<Long, StringKeyLogRecord> log;
-  private long seqid;
-
-  public StringKeyLog() {
-    this.log = new TreeMap<Long, StringKeyLogRecord>();
-    this.seqid = 0;
+  @Override
+  public long appendStateTransition(long tid, int state) throws IOException {
+    return 0;
   }
 
   @Override
-  public StringKeyLogRecord newRecord(Type type, long tid, StringKey key,
-      Long version, Long pid) {
-    return new StringKeyLogRecord(seqid++, tid, type, key, version, pid);
+  public long appendGet(long tid, StringKey key, long version)
+      throws IOException {
+    return 0;
   }
 
   @Override
-  public void append(StringKeyLogRecord record) {
-    log.put(record.getSID(), record);
+  public long appendPut(long tid, StringKey key) throws IOException {
+    return 0;
   }
 
   @Override
-  public void savepoint(long sid) {
-    log = new TreeMap<Long, StringKeyLogRecord>(log.tailMap(sid, true));
+  public long appendDelete(long tid, StringKey key) throws IOException {
+    return 0;
+  }
+
+  @Override
+  public void savepoint(long sid) throws IOException {
   }
 
   @Override
   public Iterable<StringKeyLogRecord> recover() throws IOException {
-    return log.values();
+    return Collections.emptyList();
   }
 
 }

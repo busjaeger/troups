@@ -1,8 +1,7 @@
 package edu.illinois.htx.tm.log;
 
-import org.apache.hadoop.io.Writable;
 
-public interface LogRecord extends Writable {
+public interface LogRecord {
 
   /**
    * log sequence number

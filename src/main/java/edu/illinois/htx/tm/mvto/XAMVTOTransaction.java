@@ -14,6 +14,7 @@ import java.io.IOException;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.log.XALog;
+import edu.illinois.htx.tsm.NoSuchTimestampException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
@@ -31,50 +32,64 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     super(tm);
   }
 
-  XAMVTOTransactionManager<K, ?> getTM() {
-    return (XAMVTOTransactionManager<K, ?>) tm;
-  }
-
   @Override
-  protected void doBegin() throws IOException {
+  protected void checkBegin() {
     throw newISA("Cannot begin XA transaction");
   }
 
+  @Override
+  protected boolean isActive() {
+    switch (state) {
+    case JOINED:
+    case PREPARED:
+      return true;
+    }
+    return super.isActive();
+  }
+
   public synchronized void join(long id) throws IOException {
+    checkJoin();
+    long pid = getTimestampManager().acquireReference(id);
+    getTimestampManager().addTimestampListener(id, this);
+    long sid = getTransactionLog().appendJoinLogRecord(id, pid);
+    setJoined(id, pid, sid);
+  }
+
+  protected void checkJoin() {
     switch (state) {
     case CREATED:
       break;
-    case ABORTED:
-    case STARTED:
-    case BLOCKED:
-    case COMMITTED:
-    case FINALIZED:
+    default:
       throw newISA("join");
     }
-    long pid = getTimestampManager().createReference(id);
-    getTimestampManager().addTimestampListener(id, this);
-    setID(id);
-    setPID(pid);
-    // if we fail here, TSM will clean up reference and client will abort
-    setSID(getTransactionLog().appendJoinLogRecord(id, pid));
-    setState(JOINED);
+  }
+
+  protected void setJoined(long id, long pid, long sid) {
+    this.id = id;
+    this.pid = pid;
+    this.sid = sid;
+    this.state = JOINED;
   }
 
   public synchronized void prepare() throws TransactionAbortedException,
       IOException {
-    switch (state) {
-    case STARTED:
-      break;
-    case CREATED:
-    case ABORTED:
-    case BLOCKED:
-    case COMMITTED:
-    case FINALIZED:
-      throw newISA("prepare");
-    }
-    waitUntilReadFromEmpty();
+    checkPrepare();
+    waitForReadFrom();
     getTransactionLog().appendStateTransition(id, PREPARED);
-    setState(PREPARED);
+    setPrepared();
+  }
+
+  protected void checkPrepare() {
+    switch (state) {
+    case JOINED:
+      break;
+    default:
+      throw newISA("checkPrepare");
+    }
+  }
+
+  protected void setPrepared() {
+    this.sid = PREPARED;
   }
 
   /**
@@ -84,7 +99,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
    * @param ts
    */
   @Override
-  public synchronized void deleted(long ts) {
+  public synchronized void released(long ts) {
     switch (state) {
     case FINALIZED:
     case COMMITTED:
@@ -104,8 +119,12 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
   }
 
   @Override
-  protected void afterFinalize() throws IOException {
-    getTimestampManager().releaseReference(id, pid);
+  protected void releaseTimestamp() throws IOException {
+    try {
+      getTimestampManager().releaseReference(id, pid);
+    } catch (NoSuchTimestampException e) {
+      // ignore
+    }
   }
 
   @Override
@@ -121,10 +140,6 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     if (state == CREATED)
       throw newISA("getPID");
     return this.pid;
-  }
-
-  synchronized void setPID(long pid) {
-    this.pid = pid;
   }
 
 }

@@ -145,14 +145,9 @@ public class TimestampReclaimer implements Runnable {
           }
           // time-stamps after current lrt: check if still needed
           else if (ts >= lrt) {
-            try {
-              if (tsm.hasReferences(ts)) {
-                lrt = ts;
-                break;
-              }
-            } catch (NoSuchTimestampException e) {
-              // got deleted since we retrieved it
-              continue;
+            if (!tsm.isReleased(ts)) {
+              lrt = ts - 1;
+              break;
             }
             deletes.add(ts);
           }
@@ -165,7 +160,7 @@ public class TimestampReclaimer implements Runnable {
 
       for (Long delete : deletes)
         try {
-          tsm.delete(delete);
+          tsm.release(delete);
         } catch (NoSuchTimestampException e) {
           // ignore
         }

@@ -6,7 +6,7 @@ import java.util.Comparator;
 public interface TimestampManager extends Comparator<Long> {
 
   public interface TimestampListener {
-    void deleted(long ts);
+    void released(long ts);
   }
 
   public interface TimestampReclamationListener {
@@ -20,13 +20,13 @@ public interface TimestampManager extends Comparator<Long> {
 
   /**
    * Creates a new timestamp. The timestamp exists until it is deleted
-   * explicitly via {@link TimestampManager#delete(long)} or until a certain
+   * explicitly via {@link TimestampManager#release(long)} or until a certain
    * timeout period after the creating process crashed.
    * 
    * @return
    * @throws IOException
    */
-  long create() throws IOException;
+  long acquire() throws IOException;
 
   /**
    * Deletes the given timestamp.
@@ -36,7 +36,18 @@ public interface TimestampManager extends Comparator<Long> {
    *         otherwise
    * @throws IOException
    */
-  boolean delete(long ts) throws IOException;
+  boolean release(long ts) throws IOException;
+
+  /**
+   * Can be used by clients to check whether they are the owner of the given
+   * timestamp.
+   * 
+   * @param ts
+   * @return
+   */
+  boolean isHeldByCaller(long ts) throws NoSuchTimestampException, IOException;
+
+  boolean isReleased(long ts) throws IOException;
 
   /**
    * 

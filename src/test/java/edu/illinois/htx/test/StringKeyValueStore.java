@@ -12,6 +12,7 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 
 import edu.illinois.htx.tm.KeyValueStore;
+import edu.illinois.htx.tm.LifecycleListener;
 import edu.illinois.htx.tm.TransactionOperationObserver;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
@@ -99,6 +100,13 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
   }
 
   @Override
-  public void addTransactionOperationObserver(TransactionOperationObserver<StringKey> observer) {
+  public void addTransactionOperationObserver(
+      TransactionOperationObserver<StringKey> observer) {
+    observers.add(observer);
+  }
+
+  @Override
+  public void addLifecycleListener(LifecycleListener listener) {
+    // not needed ATM
   }
 }
