@@ -15,13 +15,13 @@ public final class Util {
     super();
   }
 
-  static String create(ZooKeeperWatcher zkw, String znode,
-      byte[] data, CreateMode mode) throws InterruptedException, KeeperException {
+  static String create(ZooKeeperWatcher zkw, String znode, byte[] data,
+      CreateMode mode) throws InterruptedException, KeeperException {
     ZKUtil.waitForZKConnectionIfAuthenticating(zkw);
     return zkw.getRecoverableZooKeeper().create(znode, data,
         Ids.OPEN_ACL_UNSAFE, mode);
   }
-  
+
   static String createWithParents(ZooKeeperWatcher zkw, String znode,
       byte[] data, CreateMode mode) throws KeeperException,
       InterruptedException {
@@ -60,7 +60,9 @@ public final class Util {
   }
 
   static long getId(String node) {
-    return Long.parseLong(ZKUtil.getNodeName(node));
+    String nodeName = ZKUtil.getNodeName(node);
+    String id = nodeName.substring(nodeName.length() - 10, nodeName.length());
+    return Long.parseLong(id);
   }
 
 }

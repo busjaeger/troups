@@ -133,7 +133,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     // create an HKey set view on the family map
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
-        .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
+        .getFamilyMap().values(), HRegionTransactionManager
+        .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
     if (isDelete)
       tm.beforeDelete(tid, keys);
     else
@@ -148,7 +149,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       return;
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
-        .getFamilyMap().values(), map(HKey.KEYVALUE_TO_KEY)));
+        .getFamilyMap().values(), HRegionTransactionManager
+        .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
     if (isDelete)
       tm.beforeDelete(tid, keys);
     else
@@ -277,7 +279,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     return bytes == null ? false : Bytes.toBoolean(bytes);
   }
 
-  static <F, T> Function<Iterable<F>, Iterable<T>> map(
+  static <F, T> Function<? super Iterable<F>, ? extends Iterable<T>> map(
       final Function<? super F, ? extends T> function) {
     return new Function<Iterable<F>, Iterable<T>>() {
       @Override

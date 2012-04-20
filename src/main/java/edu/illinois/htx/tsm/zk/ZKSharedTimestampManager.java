@@ -36,7 +36,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
       while (true) {
         String tranZNode;
         try {
-          tranZNode = createWithParents(watcher, timestampsDir, new byte[0],
+          tranZNode = createWithParents(watcher, timestampNode, new byte[0],
               PERSISTENT_SEQUENTIAL);
         } catch (KeeperException e) {
           throw new IOException(e);
@@ -172,9 +172,9 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
 
   @Override
   public long acquireReference(long ts) throws IOException {
-    String tsDir = Util.join(timestampsNode, ts, "");
+    String refNode = Util.join(timestampsNode, ts, "t");
     try {
-      String partNode = Util.create(watcher, tsDir, new byte[0],
+      String partNode = Util.create(watcher, refNode, new byte[0],
           EPHEMERAL_SEQUENTIAL);
       return getId(partNode);
     } catch (KeeperException.NoNodeException e) {
