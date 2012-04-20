@@ -33,10 +33,12 @@ public class TransactionManagerImpl extends TransactionManager {
     this.pool = Executors.newFixedThreadPool(numThreads);
   }
 
+  @Override
   public Transaction begin() {
     return new LocalTransaction();
   }
 
+  @Override
   public Transaction beginXG() {
     XGTransaction tran = new XGTransaction(stsm, pool);
     try {
@@ -47,10 +49,12 @@ public class TransactionManagerImpl extends TransactionManager {
     return tran;
   }
 
+  @Override
   public void rollback(Transaction ta) {
     ta.rollback();
   }
 
+  @Override
   public void commit(Transaction ta) throws TransactionAbortedException {
     ta.commit();
   }

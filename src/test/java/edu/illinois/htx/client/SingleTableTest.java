@@ -29,7 +29,7 @@ public class SingleTableTest {
     TransactionManager tm = TransactionManager.get(conf);
     HTable table = new HTable(conf, tableName);
 
-    Transaction ta = tm.begin();
+    Transaction ta = tm.beginXG();
     try {
       Put put = new Put(row1).add(family, qualifier, toBytes(400L));
       table.put(ta, put);
@@ -45,7 +45,7 @@ public class SingleTableTest {
       // could retry here
     }
 
-    ta = tm.begin();
+    ta = tm.beginXG();
     try {
       // read balance of first account
       Get get1 = new Get(row1).addColumn(family, qualifier);

@@ -16,6 +16,8 @@ public abstract class TransactionManager {
 
   public abstract Transaction begin();
 
+  public abstract Transaction beginXG();
+
   public abstract void rollback(Transaction ta);
 
   public abstract void commit(Transaction ta)
