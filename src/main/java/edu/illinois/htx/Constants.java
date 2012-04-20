@@ -48,6 +48,8 @@ public interface Constants {
 
   public static final String ATTR_NAME_TID = "htx-tid";
 
+  public static final String ATTR_NAME_XID = "htx-xid";
+
   public static final String ATTR_NAME_DEL = "htx-del";
 
   public static final String ATTR_NAME_BEG = "htx-beg";

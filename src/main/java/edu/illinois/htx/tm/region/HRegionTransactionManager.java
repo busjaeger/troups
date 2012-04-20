@@ -37,6 +37,7 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
+import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.util.ReflectionUtils;
 
 import com.google.common.base.Function;
@@ -48,9 +49,11 @@ import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.LifecycleListener;
 import edu.illinois.htx.tm.ObservingTransactionManager;
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.TransactionOperationObserver;
 import edu.illinois.htx.tm.XATransactionManager;
+import edu.illinois.htx.tm.XID;
 import edu.illinois.htx.tm.impl.XAMVTOTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
 import edu.illinois.htx.tsm.zk.TimestampReclaimer;
@@ -125,10 +128,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void prePut(ObserverContext<RegionCoprocessorEnvironment> e, Put put,
       WALEdit edit, boolean writeToWAL) throws IOException {
-    Long tid = getTID(put);
+    TID tid = getTID(put);
     if (tid == null)
       return;
-    if (put.getTimeStamp() != tid)
+    if (put.getTimeStamp() != tid.getTS())
       throw new IllegalArgumentException("timestamp does not match tid");
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     // create an HKey set view on the family map
@@ -144,7 +147,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void postPut(ObserverContext<RegionCoprocessorEnvironment> e, Put put,
       WALEdit edit, boolean writeToWAL) throws IOException {
-    Long tid = getTID(put);
+    TID tid = getTID(put);
     if (tid == null)
       return;
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
@@ -160,14 +163,14 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void preGet(ObserverContext<RegionCoprocessorEnvironment> e,
       final Get get, List<KeyValue> results) throws IOException {
-    Long tid = getTID(get);
+    TID tid = getTID(get);
     if (tid == null)
       return;
     TimeRange tr = get.getTimeRange();
-    if (tr.getMin() != 0L || tr.getMax() != tid)
+    if (tr.getMin() != 0L || tr.getMax() != tid.getTS())
       throw new IllegalArgumentException(
-          "timerange does not match tid: (expected: " + new TimeRange(0L, tid)
-              + "), (actual: " + tr);
+          "timerange does not match tid: (expected: "
+              + new TimeRange(0L, tid.getTS()) + "), (actual: " + tr);
     Iterable<HKey> keys = transform(get.getRow(), get.getFamilyMap());
     tm.beforeGet(tid, keys);
   }
@@ -175,7 +178,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void postGet(ObserverContext<RegionCoprocessorEnvironment> e, Get get,
       final List<KeyValue> results) throws IOException {
-    Long tid = getTID(get);
+    TID tid = getTID(get);
     if (tid == null)
       return;
     // TODO check if results are already sorted by HBase; and verify newer
@@ -222,32 +225,46 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public long begin() throws IOException {
+  public TID begin() throws IOException {
     return tm.begin();
   }
 
   @Override
-  public long join(long tid) throws IOException {
+  public void commit(TID tid) throws TransactionAbortedException, IOException {
+    tm.commit(tid);
+  }
+
+  @Override
+  public void abort(TID tid) throws IOException {
+    tm.abort(tid);
+  }
+
+  @Override
+  public XID join(TID tid) throws IOException {
     if (tm instanceof XATransactionManager)
       return ((XATransactionManager) tm).join(tid);
     throw new IllegalStateException("distributed transactions not enabled");
   }
 
   @Override
-  public void prepare(long tid) throws IOException {
+  public void prepare(XID tid) throws IOException {
     if (tm instanceof XATransactionManager)
       ((XATransactionManager) tm).prepare(tid);
     throw new IllegalStateException("distributed transactions not enabled");
   }
 
   @Override
-  public void commit(long tid) throws TransactionAbortedException, IOException {
-    tm.commit(tid);
+  public void commit(XID xid) throws IOException {
+    if (tm instanceof XATransactionManager)
+      ((XATransactionManager) tm).commit(xid);
+    throw new IllegalStateException("distributed transactions not enabled");
   }
 
   @Override
-  public void abort(long tid) throws IOException {
-    tm.abort(tid);
+  public void abort(XID xid) throws IOException {
+    if (tm instanceof XATransactionManager)
+      ((XATransactionManager) tm).abort(xid);
+    throw new IllegalStateException("distributed transactions not enabled");
   }
 
   @Override
@@ -268,9 +285,21 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     lrt = timestamp;
   }
 
-  private static Long getTID(OperationWithAttributes operation) {
-    byte[] tsBytes = operation.getAttribute(Constants.ATTR_NAME_TID);
-    return tsBytes == null ? null : Bytes.toLong(tsBytes);
+  private static TID getTID(OperationWithAttributes operation) {
+    byte[] tidBytes = operation.getAttribute(Constants.ATTR_NAME_TID);
+    if (tidBytes == null)
+      return null;
+    boolean isXid = getBoolean(operation, Constants.ATTR_NAME_XID);
+    TID tid = isXid ? new XID() : new TID();
+    DataInputBuffer in = new DataInputBuffer();
+    in.reset(tidBytes, tidBytes.length);
+    try {
+      tid.readFields(in);
+      in.close();
+    } catch (IOException e) {
+      throw new IllegalArgumentException(e);
+    }
+    return tid;
   }
 
   private static boolean getBoolean(OperationWithAttributes operation,

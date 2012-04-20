@@ -21,6 +21,7 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.DataOutputBuffer;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionState;
 import edu.illinois.htx.tm.log.Log;
 import edu.illinois.htx.tm.log.OperationLogRecord;
@@ -33,8 +34,8 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
   private final HTable logTable;
   private final byte[] family;
   private final AtomicLong sid;
-  private final Map<Long, byte[]> rows;
-  private final Map<Long, HLogRecord> begins;
+  private final Map<TID, byte[]> rows;
+  private final Map<TID, HLogRecord> begins;
 
   HRegionLog(HTable table, byte[] family, ExecutorService pool,
       HRegionInfo regionInfo) {
@@ -42,8 +43,8 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
     this.family = family;
     this.logTable = table;
     this.sid = new AtomicLong(0);
-    this.rows = new ConcurrentHashMap<Long, byte[]>();
-    this.begins = new ConcurrentHashMap<Long, HLogRecord>();
+    this.rows = new ConcurrentHashMap<TID, byte[]>();
+    this.begins = new ConcurrentHashMap<TID, HLogRecord>();
   }
 
   @Override
@@ -66,7 +67,7 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
     }
     // reconstruct in-memory state
     for (HLogRecord record : records) {
-      long tid = record.getTID();
+      TID tid = record.getTID();
       if (isStarted(record)) {
         begins.put(record.getTID(), record);
         continue;
@@ -107,27 +108,27 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
   }
 
   @Override
-  public long appendStateTransition(long tid, int state) throws IOException {
+  public long appendStateTransition(TID tid, int state) throws IOException {
     return append(new HStateTransitionLogRecord(nextSID(), tid, state));
   }
 
   @Override
-  public long appendGet(long tid, HKey key, long version) throws IOException {
+  public long appendGet(TID tid, HKey key, long version) throws IOException {
     return append(new HGetLogRecord(nextSID(), tid, key, version));
   }
 
   @Override
-  public long appendPut(long tid, HKey key) throws IOException {
+  public long appendPut(TID tid, HKey key) throws IOException {
     return append(new HPutLogRecord(nextSID(), tid, key));
   }
 
   @Override
-  public long appendDelete(long tid, HKey key) throws IOException {
+  public long appendDelete(TID tid, HKey key) throws IOException {
     return append(new HDeleteLogRecord(nextSID(), tid, key));
   }
 
   protected long append(HLogRecord record) throws IOException {
-    long tid = record.getTID();
+    TID tid = record.getTID();
     // don't append begin, because we don't know the row yet
     if (isStarted(record)) {
       begins.put(tid, record);

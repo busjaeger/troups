@@ -18,7 +18,10 @@ import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HTable;
 
+import edu.illinois.htx.tm.XATransactionState;
+import edu.illinois.htx.tm.XID;
 import edu.illinois.htx.tm.log.XALog;
+import edu.illinois.htx.tm.log.XAStateTransitionLogRecord;
 
 public class XAHRegionLog extends HRegionLog implements XALog<HKey, HLogRecord> {
 
@@ -52,16 +55,22 @@ public class XAHRegionLog extends HRegionLog implements XALog<HKey, HLogRecord> 
   @Override
   protected HLogRecord create(int type) {
     switch (type) {
-    case XALog.RECORD_TYPE_JOIN:
-      return new HJoinLogRecord();
+    case XALog.RECORD_TYPE_XA_STATE_TRANSITION:
+      return new HXAStateTransitionLogRecord();
     default:
       return super.create(type);
     }
   }
 
   @Override
-  public long appendJoinLogRecord(long tid, long pid) throws IOException {
-    return append(new HJoinLogRecord(nextSID(), tid, pid));
+  protected boolean isStarted(HLogRecord record) {
+    return record.getType() == XALog.RECORD_TYPE_XA_STATE_TRANSITION
+        && ((XAStateTransitionLogRecord) record).getTransactionState() == XATransactionState.JOINED;
+  }
+
+  @Override
+  public long appendXAStateTransition(XID xid, int state) throws IOException {
+    return append(new HXAStateTransitionLogRecord(nextSID(), xid, state));
   }
 
 }

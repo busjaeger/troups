@@ -6,10 +6,10 @@ public interface TransactionManager {
 
   public static final long VERSION = 1L;
 
-  long begin() throws IOException;
+  TID begin() throws IOException;
 
-  void commit(long tid) throws TransactionAbortedException, IOException;
+  void commit(TID tid) throws TransactionAbortedException, IOException;
 
-  void abort(long tid) throws IOException;
+  void abort(TID tid) throws IOException;
 
 }

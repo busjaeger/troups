@@ -2,7 +2,9 @@ package edu.illinois.htx.client.tm;
 
 import java.io.IOException;
 
+import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.Put;
 
 import edu.illinois.htx.tm.TransactionAbortedException;
 
@@ -11,10 +13,12 @@ import edu.illinois.htx.tm.TransactionAbortedException;
  */
 public interface Transaction {
 
-  public long enlist(HTable table, byte[] row) throws IOException;
+  Get createGet(HTable table, byte[] row) throws IOException;
 
-  public void rollback();
+  Put createPut(HTable table, byte[] row) throws IOException;
 
-  public void commit() throws TransactionAbortedException;
+  void rollback();
+
+  void commit() throws TransactionAbortedException;
 
 }

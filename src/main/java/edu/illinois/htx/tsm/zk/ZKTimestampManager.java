@@ -239,9 +239,15 @@ public class ZKTimestampManager extends ZooKeeperListener implements
       }
   }
 
-  // TODO handle overflow
   @Override
   public int compare(Long o1, Long o2) {
+    if (o1 < 0) {
+      if (o2 > 0)
+        return o2.compareTo(o1);
+    } else if (o2 < 0) {
+      if (o1 > 0)
+        return o2.compareTo(o1);
+    }
     return o1.compareTo(o2);
   }
 

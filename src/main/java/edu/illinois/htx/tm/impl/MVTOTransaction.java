@@ -17,6 +17,7 @@ import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Set;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.TransactionAbortedException;
@@ -29,7 +30,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   protected final MVTOTransactionManager<K, ?> tm;
 
   // mutable state
-  protected long id;
+  protected TID id;
   protected long sid;
   protected int state;
   private final Map<K, Long> reads;
@@ -48,7 +49,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   public final synchronized void begin() throws IOException {
     checkBegin();
-    long id = getTimestampManager().acquire();
+    long ts = getTimestampManager().acquire();
+    TID id = new TID(ts);
     long sid = getTransactionLog().appendStateTransition(id, STARTED);
     setStarted(id, sid);
   }
@@ -63,7 +65,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   // in-memory state transition
-  protected void setStarted(long id, long sid) {
+  protected void setStarted(TID id, long sid) {
     this.id = id;
     this.sid = sid;
     this.state = STARTED;
@@ -165,7 +167,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
      */
     for (Entry<K, Boolean> write : writes.entrySet())
       if (write.getValue())
-        tm.getKeyValueStore().deleteVersions(write.getKey(), id);
+        tm.getKeyValueStore().deleteVersions(write.getKey(), id.getTS());
 
     // logging once is sufficient, since delete operation idempotent
     releaseTimestamp();
@@ -196,7 +198,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       } finally {
         tm.unlock(key);
       }
-      tm.getKeyValueStore().deleteVersion(key, id);
+      tm.getKeyValueStore().deleteVersion(key, id.getTS());
       it.remove();
     }
 
@@ -211,7 +213,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   protected void releaseTimestamp() throws IOException {
-    getTimestampManager().release(id);
+    getTimestampManager().release(id.getTS());
   }
 
   public final synchronized void beforeGet(Iterable<? extends K> keys) {
@@ -244,7 +246,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           /*
            * 1. filter out aborted and deleted versions
            */
-          MVTOTransaction<K> writer = tm.getTransaction(version);
+          MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
           // if we don't have the writer, assume it is has been GC'ed
           if (writer != null) {
             synchronized (writer) {
@@ -275,7 +277,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           if (writes != null) {
             MVTOTransaction<K> lastWrite = writes.lower(this);
             if (lastWrite != null
-                && tm.getTimestampManager().compare(lastWrite.id, version) > 0) {
+                && tm.getTimestampManager().compare(lastWrite.id.getTS(),
+                    version) > 0) {
               abort();
               throw new TransactionAbortedException("Read conflict");
             }
@@ -299,7 +302,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   // in-memory state transition
   protected void addGet(K key, long version) {
-    MVTOTransaction<K> writer = tm.getTransaction(version);
+    MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
     // if value is not yet committed, add a dependency in case writer aborts
     if (writer != null && writer.isActive()) {
       writer.readBy.add(this);
@@ -357,8 +360,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
             .getReaders(key);
         if (versions != null) {
           // reduce to versions that were written before this TA started
-          for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(id,
-              false).values()) {
+          for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
+              id.getTS(), false).values()) {
             // check if any version has been read by a TA that started after
             // this TA
             MVTOTransaction<K> reader = readers.higher(this);
@@ -435,7 +438,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return tm.getTimestampManager();
   }
 
-  synchronized long getID() {
+  synchronized TID getID() {
     if (state == CREATED)
       throw newISA("getID");
     return this.id;
@@ -516,22 +519,31 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   @Override
   public int compareTo(MVTOTransaction<K> ta) {
-    return Long.valueOf(id).compareTo(ta.id);
+    if (id == null)
+      throw new IllegalStateException("no id");
+    if (ta.id == null)
+      throw new IllegalArgumentException("no ta id");
+    return id.compareTo(ta.id);
   }
 
   @SuppressWarnings("unchecked")
   @Override
   public boolean equals(Object obj) {
-    if (obj == this)
-      return true;
+    if (id == null)
+      throw new IllegalStateException("no id");
     if (!(obj instanceof MVTOTransaction))
       return false;
-    return id == ((MVTOTransaction<K>) obj).id;
+    MVTOTransaction<K> ota = (MVTOTransaction<K>) obj;
+    if (ota.id == null)
+      throw new IllegalArgumentException("no ta id");
+    return id.equals(ota.id);
   }
 
   @Override
   public int hashCode() {
-    return Long.valueOf(id).hashCode();
+    if (id == null)
+      throw new IllegalStateException("no id");
+    return id.hashCode();
   }
 
   @Override

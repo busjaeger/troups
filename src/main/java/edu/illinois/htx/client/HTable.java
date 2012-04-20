@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.htx.Constants;
@@ -25,12 +24,8 @@ public class HTable implements Closeable {
   }
 
   public Result get(Transaction ta, Get get) throws IOException {
-    byte[] row = get.getRow();
-    long tid = ta.enlist(hTable, row);
-    org.apache.hadoop.hbase.client.Get hGet = new org.apache.hadoop.hbase.client.Get(
-        row);
-    setTransaction(hGet, tid);
-    hGet.setTimeRange(0L, tid);
+    org.apache.hadoop.hbase.client.Get hGet = ta
+        .createGet(hTable, get.getRow());
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
         .entrySet())
       for (byte[] column : entry.getValue())
@@ -41,7 +36,8 @@ public class HTable implements Closeable {
   }
 
   public void put(Transaction ta, Put put) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = newPut(put, ta);
+    org.apache.hadoop.hbase.client.Put hPut = ta
+        .createPut(hTable, put.getRow());
     for (List<KeyValue> kvl : put.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), kv.getValue());
@@ -56,27 +52,13 @@ public class HTable implements Closeable {
    * marker that is interpreted by our Coprocessor.
    */
   public void delete(Transaction ta, Delete delete) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = newPut(delete, ta);
+    org.apache.hadoop.hbase.client.Put hPut = ta.createPut(hTable,
+        delete.getRow());
     hPut.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);
     hTable.put(hPut);
-  }
-
-  private org.apache.hadoop.hbase.client.Put newPut(
-      Mutation mutation, Transaction ta) throws IOException {
-    byte[] row = mutation.getRow();
-    long tid = ta.enlist(hTable, row);
-    org.apache.hadoop.hbase.client.Put hPut = new org.apache.hadoop.hbase.client.Put(
-        row, tid);
-    setTransaction(hPut, tid);
-    return hPut;
-  }
-
-  private static void setTransaction(OperationWithAttributes operation, long tid) {
-    byte[] tsBytes = Bytes.toBytes(tid);
-    operation.setAttribute(Constants.ATTR_NAME_TID, tsBytes);
   }
 
   @Override

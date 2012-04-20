@@ -4,31 +4,31 @@ import java.io.IOException;
 
 public interface TransactionOperationObserver<K extends Key> {
 
-  void beforeGet(long tid, Iterable<? extends K> keys)
+  void beforeGet(TID tid, Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException;
 
-  void failedGet(long tid, Iterable<? extends K> keys, Throwable t)
+  void failedGet(TID tid, Iterable<? extends K> keys, Throwable t)
       throws TransactionAbortedException, IOException;
 
-  void afterGet(long tid, Iterable<? extends KeyVersions<K>> kvs)
+  void afterGet(TID tid, Iterable<? extends KeyVersions<K>> kvs)
       throws TransactionAbortedException, IOException;
 
-  void beforePut(long tid, Iterable<? extends K> keys)
+  void beforePut(TID tid, Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException;
 
-  void failedPut(long tid, Iterable<? extends K> keys, Throwable t)
+  void failedPut(TID tid, Iterable<? extends K> keys, Throwable t)
       throws TransactionAbortedException, IOException;
 
-  void afterPut(long tid, Iterable<? extends K> keys)
+  void afterPut(TID tid, Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException;
 
-  void beforeDelete(long tid, Iterable<? extends K> keys)
+  void beforeDelete(TID tid, Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException;
 
-  void failedDelete(long tid, Iterable<? extends K> keys, Throwable t)
+  void failedDelete(TID tid, Iterable<? extends K> keys, Throwable t)
       throws TransactionAbortedException, IOException;
 
-  void afterDelete(long tid, Iterable<? extends K> keys)
+  void afterDelete(TID tid, Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException;
 
 }

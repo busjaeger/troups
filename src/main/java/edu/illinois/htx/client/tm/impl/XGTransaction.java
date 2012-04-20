@@ -13,14 +13,21 @@ import java.util.concurrent.Future;
 
 import org.apache.hadoop.hbase.client.HTable;
 
+import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
+
+import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.Transaction;
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.XID;
 import edu.illinois.htx.tm.region.HRegionTransactionManager;
 import edu.illinois.htx.tm.region.RTM;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
-class XGTransaction implements Transaction, TimestampListener {
+class XGTransaction extends AbstractTransaction implements Transaction,
+    TimestampListener {
 
   private static enum State {
     CREATED, ACTIVE, COMMITTING, ABORTED, COMMITTED
@@ -31,8 +38,8 @@ class XGTransaction implements Transaction, TimestampListener {
   private final ExecutorService pool;
 
   // mutable state
-  private long id;
-  private final Map<RowGroup, Long> groups = new HashMap<RowGroup, Long>();
+  private TID id;
+  private final Map<RowGroup, XID> groups = new HashMap<RowGroup, XID>();
   private State state;
 
   XGTransaction(SharedTimestampManager tsm, ExecutorService pool) {
@@ -51,12 +58,13 @@ class XGTransaction implements Transaction, TimestampListener {
     case COMMITTED:
       throw newISA("begin");
     }
-    id = stsm.acquire();
+    id = new TID(stsm.acquire());
     state = State.ACTIVE;
   }
 
   @Override
-  public synchronized long enlist(HTable table, byte[] row) throws IOException {
+  protected synchronized XID getTID(HTable table, byte[] row)
+      throws IOException {
     switch (state) {
     case ACTIVE:
       break;
@@ -72,15 +80,21 @@ class XGTransaction implements Transaction, TimestampListener {
     RowGroup group = new RowGroup(table, rootRow);
 
     // this is a new row group -> enlist RTM in transaction
-    if (!groups.containsKey(group)) {
-      long pid = getRTM(group).join(id);
-      groups.put(group, pid);
-      if (!stsm.addReferenceListener(id, pid, this)) {
+    XID xid = groups.get(group);
+    if (xid == null) {
+      xid = getRTM(group).join(id);
+      groups.put(group, xid);
+      if (!stsm.addReferenceListener(xid.getTS(), xid.getPid(), this)) {
         rollback();
         throw new TransactionAbortedException();
       }
     }
-    return id;
+    return xid;
+  }
+
+  @Override
+  protected String getTIDAttr() {
+    return Constants.ATTR_NAME_XID;
   }
 
   @Override
@@ -123,7 +137,13 @@ class XGTransaction implements Transaction, TimestampListener {
 
     // Phase 2: Commit - all participants have promised to commit
     try {
-      stsm.persistReferences(id, groups.values());
+      stsm.persistReferences(id.getTS(),
+          Iterables.transform(groups.values(), new Function<XID, Long>() {
+            @Override
+            public Long apply(XID xid) {
+              return xid.getPid();
+            }
+          }));
     } catch (IOException e) {
       rollback();
       throw new TransactionAbortedException(e);
@@ -138,7 +158,7 @@ class XGTransaction implements Transaction, TimestampListener {
     while (!groups.isEmpty()) {
       List<Callable<RowGroup>> commitCalls = new ArrayList<Callable<RowGroup>>(
           groups.size());
-      for (final Entry<RowGroup, Long> entry : groups.entrySet()) {
+      for (final Entry<RowGroup, XID> entry : groups.entrySet()) {
         commitCalls.add(new Callable<RowGroup>() {
           @Override
           public RowGroup call() throws Exception {
@@ -176,7 +196,7 @@ class XGTransaction implements Transaction, TimestampListener {
 
     // clean up timestamp (not necessary, but improves performance)
     try {
-      stsm.release(id);
+      stsm.release(id.getTS());
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -203,7 +223,7 @@ class XGTransaction implements Transaction, TimestampListener {
   private Throwable invokeAllPrepare() throws TransactionAbortedException {
     List<Callable<Void>> prepareCalls = new ArrayList<Callable<Void>>(
         groups.size());
-    for (final Entry<RowGroup, Long> entry : groups.entrySet()) {
+    for (final Entry<RowGroup, XID> entry : groups.entrySet()) {
       prepareCalls.add(new Callable<Void>() {
         @Override
         public Void call() throws Exception {
@@ -241,7 +261,7 @@ class XGTransaction implements Transaction, TimestampListener {
   private void invokeAllAbort() {
     List<Callable<Void>> abortCalls = new ArrayList<Callable<Void>>(
         groups.size());
-    for (final Entry<RowGroup, Long> entry : groups.entrySet()) {
+    for (final Entry<RowGroup, XID> entry : groups.entrySet()) {
       abortCalls.add(new Callable<Void>() {
         @Override
         public Void call() throws Exception {
@@ -271,7 +291,7 @@ class XGTransaction implements Transaction, TimestampListener {
 
     // clean up timestamp (not necessary, but improves performance)
     try {
-      stsm.release(id);
+      stsm.release(id.getTS());
     } catch (IOException e) {
       e.printStackTrace();
     }
@@ -286,8 +306,8 @@ class XGTransaction implements Transaction, TimestampListener {
   }
 
   @Override
-  public String toString() {
-    return id + "(" + state + ")";
+  public synchronized String toString() {
+    return id.getTS() + " (" + state + ") " + groups.toString();
   }
 
 }

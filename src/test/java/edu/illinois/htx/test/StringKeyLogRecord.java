@@ -1,5 +1,6 @@
 package edu.illinois.htx.test;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.LogRecord;
 
 public class StringKeyLogRecord implements LogRecord {
@@ -10,8 +11,8 @@ public class StringKeyLogRecord implements LogRecord {
   }
 
   @Override
-  public long getTID() {
-    return 0;
+  public TID getTID() {
+    return null;
   }
 
   @Override

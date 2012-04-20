@@ -13,6 +13,7 @@ import java.util.TreeMap;
 
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.LifecycleListener;
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionOperationObserver;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
@@ -36,23 +37,23 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
     this.observers = new ArrayList<TransactionOperationObserver<StringKey>>();
   }
 
-  public void putVersionObserved(long tid, StringKey key)
+  public void putVersion(TID tid, StringKey key)
       throws TransactionAbortedException, IOException {
     Iterable<StringKey> keys = Arrays.asList(key);
     for (TransactionOperationObserver<StringKey> observer : observers)
       observer.beforePut(tid, keys);
-    putVersion(key, tid);
+    putVersion(key, tid.getTS());
     for (TransactionOperationObserver<StringKey> observer : observers)
       observer.afterPut(tid, keys);
   }
 
-  public Iterable<Long> getVersionsObserved(long tid, final StringKey key)
+  public Iterable<Long> getVersions(TID tid, final StringKey key)
       throws TransactionAbortedException, IOException {
     for (TransactionOperationObserver<StringKey> observer : observers) {
       Iterable<StringKey> keys = Arrays.asList(key);
       observer.beforeGet(tid, keys);
     }
-    Iterable<Long> versions = getVersions(key, tid);
+    Iterable<Long> versions = getVersions(key, tid.getTS());
     for (TransactionOperationObserver<StringKey> observer : observers) {
       Iterable<StringKeyVersions> kvs = asList(new StringKeyVersions(key,
           versions));

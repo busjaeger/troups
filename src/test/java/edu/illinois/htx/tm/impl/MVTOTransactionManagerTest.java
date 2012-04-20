@@ -1,4 +1,4 @@
-package edu.illinois.htx.tm.mvto;
+package edu.illinois.htx.tm.impl;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -21,6 +21,7 @@ import edu.illinois.htx.test.StringKeyLog;
 import edu.illinois.htx.test.StringKeyLogRecord;
 import edu.illinois.htx.test.StringKeyValueStore;
 import edu.illinois.htx.test.StringKeyVersions;
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.impl.MVTOTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager;
@@ -56,22 +57,22 @@ public class MVTOTransactionManagerTest {
     kvs.putVersion(key, version);
     tsm.release(version);
 
-    long t1 = tm.begin();
-    long t2 = tm.begin();
+    TID t1 = tm.begin();
+    TID t2 = tm.begin();
 
     // both transactions read the initial version
-    kvs.getVersionsObserved(t1, key);
-    kvs.getVersionsObserved(t2, key);
+    kvs.getVersions(t1, key);
+    kvs.getVersions(t2, key);
 
     try {
-      kvs.putVersionObserved(t1, key);
+      kvs.putVersion(t1, key);
       Assert.fail("transaction 1 should have failed write check");
     } catch (TransactionAbortedException e) {
       // expected
     }
 
     try {
-      kvs.putVersionObserved(t2, key);
+      kvs.putVersion(t2, key);
     } catch (TransactionAbortedException e) {
       e.printStackTrace();
       Assert.fail("tran 2 aborted unexpectedly");
@@ -82,7 +83,7 @@ public class MVTOTransactionManagerTest {
     Iterable<Long> versions = kvs.getVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(t2), it.next());
+    Assert.assertEquals(Long.valueOf(t2.getTS()), it.next());
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());
@@ -96,10 +97,10 @@ public class MVTOTransactionManagerTest {
     Iterable<StringKey> keys = Arrays.asList(key);
     kvs.putVersion(key, version);
 
-    long t1 = tm.begin();
-    long t2 = tm.begin();
+    TID t1 = tm.begin();
+    TID t2 = tm.begin();
 
-    Iterable<Long> versions = kvs.getVersionsObserved(t1, key);
+    Iterable<Long> versions = kvs.getVersions(t1, key);
     tm.beforePut(t1, keys);
 
     /*
@@ -122,7 +123,7 @@ public class MVTOTransactionManagerTest {
     versions = kvs.getVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(t1), it.next());
+    Assert.assertEquals(Long.valueOf(t1.getTS()), it.next());
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());
@@ -140,14 +141,14 @@ public class MVTOTransactionManagerTest {
     long version = tsm.acquire();
     kvs.putVersion(key, version);
 
-    final long t1 = tm.begin();
-    final long t2 = tm.begin();
+    final TID t1 = tm.begin();
+    final TID t2 = tm.begin();
 
-    kvs.getVersionsObserved(t1, key);
-    kvs.putVersionObserved(t1, key);
+    kvs.getVersions(t1, key);
+    kvs.putVersion(t1, key);
 
-    kvs.getVersionsObserved(t2, key);
-    kvs.putVersionObserved(t2, key);
+    kvs.getVersions(t2, key);
+    kvs.putVersion(t2, key);
 
     Callable<Void> commit2 = new Callable<Void>() {
       @Override
@@ -184,9 +185,9 @@ public class MVTOTransactionManagerTest {
     Iterable<Long> versions = kvs.getVersions(key);
     Iterator<Long> it = versions.iterator();
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(t2), it.next());
+    Assert.assertEquals(Long.valueOf(t2.getTS()), it.next());
     Assert.assertTrue(it.hasNext());
-    Assert.assertEquals(Long.valueOf(t1), it.next());
+    Assert.assertEquals(Long.valueOf(t1.getTS()), it.next());
     Assert.assertTrue(it.hasNext());
     Assert.assertEquals(Long.valueOf(0), it.next());
     Assert.assertFalse(it.hasNext());

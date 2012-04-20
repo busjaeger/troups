@@ -6,6 +6,7 @@ import java.io.IOException;
 
 import org.apache.hadoop.io.Writable;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.LogRecord;
 
 public abstract class HLogRecord implements LogRecord, Writable,
@@ -13,13 +14,13 @@ public abstract class HLogRecord implements LogRecord, Writable,
 
   private transient final int type;
   private long sid;
-  private long tid;
+  private TID tid;
 
   HLogRecord(int type) {
     this.type = type;
   }
 
-  HLogRecord(int type, long sid, long tid) {
+  HLogRecord(int type, long sid, TID tid) {
     this(type);
     this.sid = sid;
     this.tid = tid;
@@ -31,7 +32,7 @@ public abstract class HLogRecord implements LogRecord, Writable,
   }
 
   @Override
-  public long getTID() {
+  public TID getTID() {
     return tid;
   }
 
@@ -48,13 +49,18 @@ public abstract class HLogRecord implements LogRecord, Writable,
   @Override
   public void write(DataOutput out) throws IOException {
     out.writeLong(sid);
-    out.writeLong(tid);
+    tid.write(out);
   }
 
   @Override
   public void readFields(DataInput in) throws IOException {
     sid = in.readLong();
-    tid = in.readLong();
+    tid = createTID();
+    tid.readFields(in);
+  }
+
+  protected TID createTID() {
+    return new TID();
   }
 
 }

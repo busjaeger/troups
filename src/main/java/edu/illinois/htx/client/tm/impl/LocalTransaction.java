@@ -5,16 +5,19 @@ import java.io.IOException;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.util.Bytes;
 
+import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.Transaction;
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.region.HRegionTransactionManager;
 import edu.illinois.htx.tm.region.RTM;
 
-public class LocalTransaction implements Transaction {
+public class LocalTransaction extends AbstractTransaction implements
+    Transaction {
 
   private HTable table;
   private byte[] row;
-  private long id;
+  private TID id;
   private boolean completed = false;
 
   LocalTransaction() {
@@ -22,7 +25,7 @@ public class LocalTransaction implements Transaction {
   }
 
   @Override
-  public long enlist(HTable table, byte[] row) throws IOException {
+  public TID getTID(HTable table, byte[] row) throws IOException {
     if (completed)
       throw new IllegalStateException("Already completed");
 
@@ -46,6 +49,11 @@ public class LocalTransaction implements Transaction {
             "Local transaction cannot span row groups");
     }
     return id;
+  }
+
+  @Override
+  protected String getTIDAttr() {
+    return Constants.ATTR_NAME_TID;
   }
 
   @Override

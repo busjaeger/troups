@@ -4,6 +4,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.OperationLogRecord;
 
 public abstract class HOperationLogRecord extends HLogRecord implements
@@ -15,7 +16,7 @@ public abstract class HOperationLogRecord extends HLogRecord implements
     super(type);
   }
 
-  public HOperationLogRecord(int type, long sid, long tid, HKey key) {
+  public HOperationLogRecord(int type, long sid, TID tid, HKey key) {
     super(type, sid, tid);
     this.key = key;
   }

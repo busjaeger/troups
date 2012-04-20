@@ -1,5 +1,7 @@
 package edu.illinois.htx.tm.log;
 
+import edu.illinois.htx.tm.TID;
+
 
 public interface LogRecord {
 
@@ -15,7 +17,7 @@ public interface LogRecord {
    * 
    * @return
    */
-  long getTID();
+  TID getTID();
 
   /**
    * type of log record

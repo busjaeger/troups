@@ -11,6 +11,7 @@ import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_PUT;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -32,6 +33,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.jboss.netty.util.internal.ConcurrentHashMap;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.KeyVersions;
@@ -117,12 +119,14 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   protected final KeyValueStore<K> keyValueStore;
   // transaction log
   protected final Log<K, R> transactionLog;
-  // timestamp oracle
+  // timestamp manager
   protected final TimestampManager timestampManager;
+  // used to order transactions by timestamp
+  protected final Comparator<MVTOTransaction<K>> timestampComparator;
 
   // mutable state
   // transactions by transaction ID for efficient direct lookup
-  protected final NavigableMap<Long, MVTOTransaction<K>> transactions;
+  protected final NavigableMap<TID, MVTOTransaction<K>> transactions;
   // TAs indexed by key and versions read for efficient conflict detection
   protected final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> readers;
   // TAs indexed by key currently being written for efficient conflict detection
@@ -133,23 +137,30 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   // queue of transactions ready to be reclaimed
   protected final Set<MVTOTransaction<K>> reclaimables;
   // lock protect the previous two conflict detection data structures
-  protected final ConcurrentMap<Key, Lock> keyLocks = new ConcurrentHashMap<Key, Lock>();
+  protected final ConcurrentMap<Key, Lock> keyLocks;
   // flag to indicate whether this TM is running
   protected boolean running;
   // guards the running flag
   protected ReadWriteLock runLock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore, Log<K, R> log,
-      TimestampManager timestampManager) {
+      TimestampManager tsm) {
     this.keyValueStore = keyValueStore;
     this.transactionLog = log;
-    this.timestampManager = timestampManager;
+    this.timestampManager = tsm;
+    this.timestampComparator = new Comparator<MVTOTransaction<K>>() {
+      @Override
+      public int compare(MVTOTransaction<K> t1, MVTOTransaction<K> t2) {
+        return timestampManager.compare(t1.getID().getTS(), t2.getID().getTS());
+      }
+    };
 
-    this.transactions = new TreeMap<Long, MVTOTransaction<K>>();
+    this.transactions = new TreeMap<TID, MVTOTransaction<K>>();
     this.readers = new HashMap<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
     this.activeWriters = new HashMap<K, NavigableSet<MVTOTransaction<K>>>();
     this.activeReaders = new ConcurrentLinkedQueue<MVTOTransaction<K>>();
     this.reclaimables = new HashSet<MVTOTransaction<K>>();
+    this.keyLocks = new ConcurrentHashMap<Key, Lock>();
 
     this.keyValueStore.addLifecycleListener(this);
     this.keyValueStore.addTransactionOperationObserver(this);
@@ -233,7 +244,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void beforeGet(long tid, final Iterable<? extends K> keys)
+  public void beforeGet(TID tid, final Iterable<? extends K> keys)
       throws IOException {
     new WithReadLock() {
       @Override
@@ -244,7 +255,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void afterGet(long tid, final Iterable<? extends KeyVersions<K>> kvs)
+  public void afterGet(TID tid, final Iterable<? extends KeyVersions<K>> kvs)
       throws IOException {
     new WithReadLock() {
       @Override
@@ -255,7 +266,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void failedGet(long tid, final Iterable<? extends K> keys,
+  public void failedGet(TID tid, final Iterable<? extends K> keys,
       final Throwable t) throws TransactionAbortedException, IOException {
     new WithReadLock() {
       @Override
@@ -266,7 +277,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void beforePut(long tid, final Iterable<? extends K> keys)
+  public void beforePut(TID tid, final Iterable<? extends K> keys)
       throws IOException {
     new WithReadLock() {
       @Override
@@ -277,7 +288,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void afterPut(long tid, final Iterable<? extends K> keys)
+  public void afterPut(TID tid, final Iterable<? extends K> keys)
       throws IOException {
     new WithReadLock() {
       @Override
@@ -288,7 +299,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void failedPut(long tid, final Iterable<? extends K> keys,
+  public void failedPut(TID tid, final Iterable<? extends K> keys,
       final Throwable t) throws TransactionAbortedException, IOException {
     new WithReadLock() {
       @Override
@@ -299,7 +310,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void beforeDelete(long tid, final Iterable<? extends K> keys)
+  public void beforeDelete(TID tid, final Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException {
     new WithReadLock() {
       @Override
@@ -310,7 +321,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void failedDelete(long tid, final Iterable<? extends K> keys,
+  public void failedDelete(TID tid, final Iterable<? extends K> keys,
       final Throwable t) throws TransactionAbortedException, IOException {
     new WithReadLock() {
       @Override
@@ -321,7 +332,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void afterDelete(long tid, final Iterable<? extends K> keys)
+  public void afterDelete(TID tid, final Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException {
     new WithReadLock() {
       @Override
@@ -332,7 +343,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public long begin() throws IOException {
+  public TID begin() throws IOException {
     runLock.readLock().lock();
     try {
       checkRunning();
@@ -346,7 +357,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void commit(final long tid) throws IOException {
+  public void commit(final TID tid) throws IOException {
     new WithReadLock() {
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.commit();
@@ -356,7 +367,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void abort(final long tid) throws IOException {
+  public void abort(final TID tid) throws IOException {
     new WithReadLock() {
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.abort();
@@ -366,13 +377,13 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   abstract class WithReadLock {
-    void run(long tid) throws IOException {
+    void run(TID id) throws IOException {
       runLock.readLock().lock();
       try {
         checkRunning();
-        MVTOTransaction<K> ta = getTransaction(tid);
+        MVTOTransaction<K> ta = getTransaction(id);
         if (ta == null)
-          throw new IllegalStateException("Transaction " + tid
+          throw new IllegalStateException("Transaction " + id
               + " does not exist");
         execute(ta);
       } finally {
@@ -428,7 +439,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
    * @param tid
    * @return
    */
-  MVTOTransaction<K> getTransaction(long tid) {
+  MVTOTransaction<K> getTransaction(TID tid) {
     synchronized (transactions) {
       return transactions.get(tid);
     }
@@ -459,7 +470,8 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
     }
     NavigableSet<MVTOTransaction<K>> readers = versions.get(version);
     if (readers == null)
-      versions.put(version, readers = new TreeSet<MVTOTransaction<K>>());
+      versions.put(version, readers = new TreeSet<MVTOTransaction<K>>(
+          timestampComparator));
     readers.add(reader);
   }
 
@@ -495,7 +507,8 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
     synchronized (activeWriters) {
       writes = activeWriters.get(key);
       if (writes == null)
-        activeWriters.put(key, writes = new TreeSet<MVTOTransaction<K>>());
+        activeWriters.put(key, writes = new TreeSet<MVTOTransaction<K>>(
+            timestampComparator));
     }
     writes.add(writer);
   }
@@ -531,9 +544,10 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   @Override
   public void reclaimed(long ts) {
     updateReclaimables();
-    for (MVTOTransaction<K> ta : getTransactions())
-      if (ta.getID() <= ts)
+    for (MVTOTransaction<K> ta : getTransactions()) {
+      if (timestampManager.compare(ta.getID().getTS(), ts) <= 0)
         reclaim(ta);
+    }
   }
 
   private void updateReclaimables() {
@@ -579,7 +593,7 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   protected void replay(LogRecord record) {
-    long tid = record.getTID();
+    TID tid = record.getTID();
     int type = record.getType();
     MVTOTransaction<K> ta = transactions.get(tid);
     switch (type) {
@@ -590,8 +604,9 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
         if (ta != null)
           throw new IllegalStateException(
               "begin record for existing transaction");
-        transactions.put(tid, ta = new MVTOTransaction<K>(this));
+        ta = new MVTOTransaction<K>(this);
         ta.setStarted(tid, record.getSID());
+        transactions.put(ta.getID(), ta);
         return;
       case COMMITTED:
         if (ta == null)
@@ -646,12 +661,13 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   // technically we don't need to abort
   protected void recover(MVTOTransaction<K> ta) {
     try {
-      long tid = ta.getID();
+      TID tid = ta.getID();
       switch (ta.getState()) {
       case CREATED:
         throw new IllegalStateException("Created transaction during recovery");
       case STARTED:
-        if (!timestampManager.isHeldByCaller(tid))
+        // TODO check if any operations failed in the middle
+        if (!timestampManager.isHeldByCaller(tid.getTS()))
           ta.abort();
       case BLOCKED:
         throw new IllegalStateException("Blocked transaction during recovery");

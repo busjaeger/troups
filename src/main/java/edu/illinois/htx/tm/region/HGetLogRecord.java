@@ -4,6 +4,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.GetLogRecord;
 import edu.illinois.htx.tm.log.Log;
 
@@ -15,7 +16,7 @@ class HGetLogRecord extends HOperationLogRecord implements GetLogRecord<HKey> {
     super(Log.RECORD_TYPE_GET);
   }
 
-  public HGetLogRecord(long sid, long tid, HKey key, long version) {
+  public HGetLogRecord(long sid, TID tid, HKey key, long version) {
     super(Log.RECORD_TYPE_GET, sid, tid, key);
     this.version = version;
   }

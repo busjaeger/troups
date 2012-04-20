@@ -12,7 +12,9 @@ import static edu.illinois.htx.tm.impl.XATransactionState.PREPARED;
 import java.io.IOException;
 
 import edu.illinois.htx.tm.Key;
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.XID;
 import edu.illinois.htx.tm.log.XALog;
 import edu.illinois.htx.tsm.NoSuchTimestampException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
@@ -20,8 +22,6 @@ import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
 public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     implements TimestampListener {
-
-  private long pid;
 
   public XAMVTOTransaction(XAMVTOTransactionManager<K, ?> tm) {
     super(tm);
@@ -42,12 +42,14 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     return super.isActive();
   }
 
-  public synchronized void join(long id) throws IOException {
+  public synchronized void join(TID id) throws IOException {
     checkJoin();
-    long pid = getTimestampManager().acquireReference(id);
-    getTimestampManager().addTimestampListener(id, this);
-    long sid = getTransactionLog().appendJoinLogRecord(id, pid);
-    setJoined(id, pid, sid);
+    long ts = id.getTS();
+    long pid = getTimestampManager().acquireReference(ts);
+    getTimestampManager().addTimestampListener(ts, this);
+    long sid = getTransactionLog().appendXAStateTransition(getID(), JOINED);
+    XID xid = new XID(ts, pid);
+    setJoined(xid, sid);
   }
 
   protected void checkJoin() {
@@ -59,9 +61,8 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     }
   }
 
-  protected void setJoined(long id, long pid, long sid) {
+  protected void setJoined(XID id, long sid) {
     this.id = id;
-    this.pid = pid;
     this.sid = sid;
     this.state = JOINED;
   }
@@ -70,7 +71,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
       IOException {
     checkPrepare();
     waitForReadFrom();
-    getTransactionLog().appendStateTransition(id, PREPARED);
+    getTransactionLog().appendXAStateTransition(getID(), PREPARED);
     setPrepared();
   }
 
@@ -116,7 +117,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
   @Override
   protected void releaseTimestamp() throws IOException {
     try {
-      getTimestampManager().releaseReference(id, pid);
+      getTimestampManager().releaseReference(getID().getTS(), getID().getPid());
     } catch (NoSuchTimestampException e) {
       // ignore
     }
@@ -127,14 +128,13 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     return ((XAMVTOTransactionManager<K, ?>) tm).getTimestampManager();
   }
 
+  @Override
   protected XALog<K, ?> getTransactionLog() {
-    return ((XAMVTOTransactionManager<K, ?>) tm).getTransactionLog();
+    return (XALog<K, ?>) tm.getTransactionLog();
   }
 
-  synchronized long getPID() {
-    if (state == CREATED)
-      throw newISA("getPID");
-    return this.pid;
+  synchronized XID getID() {
+    return (XID) super.getID();
   }
 
 }

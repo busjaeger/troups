@@ -1,5 +1,6 @@
 package edu.illinois.htx.tm.region;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.Log;
 
 public class HDeleteLogRecord extends HOperationLogRecord {
@@ -8,7 +9,7 @@ public class HDeleteLogRecord extends HOperationLogRecord {
     super(Log.RECORD_TYPE_DELETE);
   }
 
-  public HDeleteLogRecord(long sid, long tid, HKey key) {
+  public HDeleteLogRecord(long sid, TID tid, HKey key) {
     super(Log.RECORD_TYPE_DELETE, sid, tid, key);
   }
 

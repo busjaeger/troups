@@ -6,6 +6,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.StateTransitionLogRecord;
 
 public class HStateTransitionLogRecord extends HLogRecord implements
@@ -17,7 +18,7 @@ public class HStateTransitionLogRecord extends HLogRecord implements
     super(RECORD_TYPE_STATE_TRANSITION);
   }
 
-  HStateTransitionLogRecord(long sid, long tid, int state) {
+  HStateTransitionLogRecord(long sid, TID tid, int state) {
     super(RECORD_TYPE_STATE_TRANSITION, sid, tid);
     this.state = state;
   }
@@ -26,7 +27,7 @@ public class HStateTransitionLogRecord extends HLogRecord implements
     super(type);
   }
 
-  HStateTransitionLogRecord(int type, long sid, long tid, int state) {
+  HStateTransitionLogRecord(int type, long sid, TID tid, int state) {
     super(type, sid, tid);
     this.state = state;
   }
