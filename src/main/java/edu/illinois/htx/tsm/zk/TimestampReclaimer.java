@@ -36,7 +36,8 @@ public class TimestampReclaimer implements Runnable {
   private final String collectorsNode;
 
   private String zNode;
-  private Long lrt;
+  private Long lastReclaimed;
+  private long lastSeen;
 
   public TimestampReclaimer(ReclaimableTimestampManager tsm,
       Configuration conf, ScheduledExecutorService pool, ZooKeeperWatcher zkw) {
@@ -107,37 +108,41 @@ public class TimestampReclaimer implements Runnable {
   @Override
   public void run() {
     try {
-      if (lrt == null)
-        lrt = tsm.getLastReclaimedTimestamp();
+      if (lastReclaimed == null) {
+        lastReclaimed = tsm.getLastReclaimedTimestamp();
+        lastSeen = lastReclaimed;
+      }
 
-      long newLrt = lrt;
+      long newLastReclaimed = lastReclaimed;
       List<Long> deletes = new ArrayList<Long>();
-      // the order of these two calls is important: it's OK to not reclaim a
-      // timestamp, but not OK to reclaim one that's still in use!
-      long lct = tsm.getLastCreatedTimestamp();
-      Iterable<Long> timestamps = tsm.getTimestamps();
+      List<Long> timestamps = tsm.getTimestamps();
 
-      if (!timestamps.iterator().hasNext()) {
-//        newLrt = lct;
+      if (timestamps.isEmpty()) {
+        // with 'lastSeen' we are not guaranteed to always clean up transactions
+        // right away, but we will eventually and it performs well
+        newLastReclaimed = lastSeen;
       } else {
+        long last = timestamps.get(timestamps.size() - 1);
+        if (last > lastSeen)
+          lastSeen = last;
         for (long ts : timestamps) {
           // time-stamps that we failed to delete before
-          if (ts < lrt) {
+          if (ts < lastReclaimed) {
             deletes.add(ts);
           }
           // time-stamps after current lrt: check if still needed
-          else if (ts >= lrt) {
+          else if (ts >= lastReclaimed) {
             if (!tsm.isReleased(ts)) {
-              lrt = ts - 1;
+              lastReclaimed = ts - 1;
               break;
             }
             deletes.add(ts);
           }
         }
       }
-      if (newLrt != lrt) {
-        tsm.setLastReclaimedTimestamp(newLrt);
-        lrt = newLrt;
+      if (newLastReclaimed != lastReclaimed) {
+        tsm.setLastReclaimedTimestamp(newLastReclaimed);
+        lastReclaimed = newLastReclaimed;
       }
 
       for (Long delete : deletes)

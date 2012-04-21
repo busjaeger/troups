@@ -180,7 +180,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   }
 
   @Override
-  public Iterable<Long> getTimestamps() throws IOException {
+  public List<Long> getTimestamps() throws IOException {
     List<String> children;
     try {
       children = ZKUtil.listChildrenNoWatch(watcher, timestampsNode);
