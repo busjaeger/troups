@@ -61,35 +61,17 @@ public class ZKTimestampManager extends ZooKeeperListener implements
 
   @Override
   public long acquire() throws IOException {
-    Stat stat = new Stat();
-    try {
-      ZKUtil.getDataNoWatch(watcher, timestampsNode, stat);
-    } catch (KeeperException e1) {
-      e1.printStackTrace();
-    }
-    System.out.println("Cversion before: " + stat.getCversion());
-
-    long id;
     try {
       String tsNode = createWithParents(watcher, timestampsDir, new byte[0],
           EPHEMERAL_SEQUENTIAL);
-      id = getId(tsNode);
-      System.out.println("Acquired: " + id);
-
+      long id = getId(tsNode);
+      return id;
     } catch (KeeperException e) {
       throw new IOException(e);
     } catch (InterruptedException e) {
       Thread.interrupted();
       throw new IOException(e);
     }
-
-    try {
-      ZKUtil.getDataNoWatch(watcher, timestampsNode, stat);
-    } catch (KeeperException e1) {
-      e1.printStackTrace();
-    }
-    System.out.println("Cversion after: " + stat.getCversion());
-    return id;
   }
 
   @Override
