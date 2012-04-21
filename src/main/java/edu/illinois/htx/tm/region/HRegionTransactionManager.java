@@ -124,6 +124,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         listener.aborting();
       else
         listener.stopping();
+    pool.shutdown();
   }
 
   @Override
