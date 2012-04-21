@@ -31,7 +31,7 @@ public final class Util {
           .create(znode, data, Ids.OPEN_ACL_UNSAFE, mode);
     } catch (KeeperException.NoNodeException nne) {
       String parent = ZKUtil.getParent(znode);
-      ZKUtil.createWithParents(zkw, parent);
+      createWithParents(zkw, parent, new byte[0], CreateMode.PERSISTENT);
       return createWithParents(zkw, znode, data, mode);
     }
   }
@@ -60,7 +60,7 @@ public final class Util {
   }
 
   static String join(String base, String path, String path2) {
-    return base + ZK_SEP + path + path2;
+    return base + ZK_SEP + path + ZK_SEP + path2;
   }
 
   static String toDir(String node) {

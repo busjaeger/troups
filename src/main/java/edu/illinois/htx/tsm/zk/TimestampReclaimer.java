@@ -6,6 +6,7 @@ import static edu.illinois.htx.Constants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLA
 import static edu.illinois.htx.Constants.TM_TSC_INTERVAL;
 import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.htx.Constants.ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
+import static edu.illinois.htx.tsm.zk.Util.createWithParents;
 import static edu.illinois.htx.tsm.zk.Util.join;
 import static edu.illinois.htx.tsm.zk.Util.setWatch;
 import static edu.illinois.htx.tsm.zk.Util.toDir;
@@ -23,7 +24,6 @@ import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.ZooDefs.Ids;
 
 import edu.illinois.htx.tsm.NoSuchTimestampException;
 
@@ -52,7 +52,7 @@ public class TimestampReclaimer implements Runnable {
 
   public void start() {
     try {
-      zNode = createWithParents(toDir(collectorsNode), new byte[0],
+      zNode = createWithParents(zkw, toDir(collectorsNode), new byte[0],
           CreateMode.EPHEMERAL_SEQUENTIAL);
       tryToBecomeCollector();
     } catch (KeeperException e) {
@@ -60,19 +60,6 @@ public class TimestampReclaimer implements Runnable {
     } catch (InterruptedException e) {
       Thread.interrupted();
       throw new RuntimeException(e);
-    }
-  }
-
-  protected String createWithParents(String znode, byte[] data, CreateMode mode)
-      throws KeeperException, InterruptedException {
-    try {
-      ZKUtil.waitForZKConnectionIfAuthenticating(zkw);
-      return zkw.getRecoverableZooKeeper().create(znode, data,
-          Ids.OPEN_ACL_UNSAFE, mode);
-    } catch (KeeperException.NoNodeException nne) {
-      String parent = ZKUtil.getParent(znode);
-      ZKUtil.createWithParents(zkw, parent);
-      return createWithParents(znode, data, mode);
     }
   }
 
@@ -131,9 +118,9 @@ public class TimestampReclaimer implements Runnable {
       Iterable<Long> timestamps = tsm.getTimestamps();
 
       if (!timestamps.iterator().hasNext()) {
-        newLrt = lct;
+//        newLrt = lct;
       } else {
-        for (long ts : tsm.getTimestamps()) {
+        for (long ts : timestamps) {
           // time-stamps that we failed to delete before
           if (ts < lrt) {
             deletes.add(ts);

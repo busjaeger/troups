@@ -4,8 +4,8 @@ import static edu.illinois.htx.tm.TransactionState.ABORTED;
 import static edu.illinois.htx.tm.TransactionState.COMMITTED;
 import static edu.illinois.htx.tm.TransactionState.FINALIZED;
 import static edu.illinois.htx.tm.TransactionState.STARTED;
-import static edu.illinois.htx.tm.impl.LocalTransactionState.BLOCKED;
-import static edu.illinois.htx.tm.impl.LocalTransactionState.CREATED;
+import static edu.illinois.htx.tm.impl.TransientTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.impl.TransientTransactionState.CREATED;
 import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_DELETE;
 import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_PUT;
 

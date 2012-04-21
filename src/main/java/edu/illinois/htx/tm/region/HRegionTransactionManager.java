@@ -242,30 +242,30 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   @Override
   public XID join(TID tid) throws IOException {
-    if (tm instanceof XATransactionManager)
-      return ((XATransactionManager) tm).join(tid);
-    throw new IllegalStateException("distributed transactions not enabled");
+    if (!(tm instanceof XATransactionManager))
+      throw new IllegalStateException("distributed transactions not enabled");
+    return ((XATransactionManager) tm).join(tid);
   }
 
   @Override
   public void prepare(XID tid) throws IOException {
-    if (tm instanceof XATransactionManager)
-      ((XATransactionManager) tm).prepare(tid);
-    throw new IllegalStateException("distributed transactions not enabled");
+    if (!(tm instanceof XATransactionManager))
+      throw new IllegalStateException("distributed transactions not enabled");
+    ((XATransactionManager) tm).prepare(tid);
   }
 
   @Override
-  public void commit(XID xid) throws IOException {
-    if (tm instanceof XATransactionManager)
-      ((XATransactionManager) tm).commit(xid);
-    throw new IllegalStateException("distributed transactions not enabled");
+  public void commit(XID xid, boolean onePhase) throws IOException {
+    if (!(tm instanceof XATransactionManager))
+      throw new IllegalStateException("distributed transactions not enabled");
+    ((XATransactionManager) tm).commit(xid, onePhase);
   }
 
   @Override
   public void abort(XID xid) throws IOException {
-    if (tm instanceof XATransactionManager)
-      ((XATransactionManager) tm).abort(xid);
-    throw new IllegalStateException("distributed transactions not enabled");
+    if (!(tm instanceof XATransactionManager))
+      throw new IllegalStateException("distributed transactions not enabled");
+    ((XATransactionManager) tm).abort(xid);
   }
 
   @Override

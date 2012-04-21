@@ -4,10 +4,10 @@ import static edu.illinois.htx.tm.TransactionState.ABORTED;
 import static edu.illinois.htx.tm.TransactionState.COMMITTED;
 import static edu.illinois.htx.tm.TransactionState.FINALIZED;
 import static edu.illinois.htx.tm.TransactionState.STARTED;
-import static edu.illinois.htx.tm.impl.LocalTransactionState.BLOCKED;
-import static edu.illinois.htx.tm.impl.LocalTransactionState.CREATED;
-import static edu.illinois.htx.tm.impl.XATransactionState.JOINED;
-import static edu.illinois.htx.tm.impl.XATransactionState.PREPARED;
+import static edu.illinois.htx.tm.impl.TransientTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.impl.TransientTransactionState.CREATED;
+import static edu.illinois.htx.tm.XATransactionState.JOINED;
+import static edu.illinois.htx.tm.XATransactionState.PREPARED;
 
 import java.io.IOException;
 
@@ -28,7 +28,7 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
   }
 
   @Override
-  protected void checkBegin() {
+  protected boolean shouldBegin() {
     throw newISA("Cannot begin XA transaction");
   }
 
@@ -69,23 +69,50 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
 
   public synchronized void prepare() throws TransactionAbortedException,
       IOException {
-    checkPrepare();
+    if (!shouldPrepare())
+      return;
     waitForReadFrom();
     getTransactionLog().appendXAStateTransition(getID(), PREPARED);
     setPrepared();
   }
 
-  protected void checkPrepare() {
+  protected boolean shouldPrepare() {
     switch (state) {
     case JOINED:
-      break;
+      return true;
+    case PREPARED:
+      return false;
     default:
       throw newISA("checkPrepare");
     }
   }
 
-  protected void setPrepared() {
-    this.sid = PREPARED;
+  protected synchronized void setPrepared() {
+    this.state = PREPARED;
+  }
+
+  @Override
+  protected boolean shouldCommit() {
+    switch (state) {
+    case PREPARED:
+      return true;
+    case JOINED:
+      return false;
+    default:
+      return super.shouldCommit();
+    }
+  }
+
+  @Override
+  protected boolean shouldAbort() {
+    switch (state) {
+    case PREPARED:
+      return true;
+    case JOINED:
+      return true;
+    default:
+      return super.shouldAbort();
+    }
   }
 
   /**

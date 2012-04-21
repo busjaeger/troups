@@ -1,5 +1,6 @@
 package edu.illinois.htx.client.tm;
 
+import java.io.Closeable;
 import java.io.IOException;
 
 import org.apache.hadoop.conf.Configuration;
@@ -7,7 +8,7 @@ import org.apache.hadoop.conf.Configuration;
 import edu.illinois.htx.client.tm.impl.TransactionManagerImpl;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
-public abstract class TransactionManager {
+public abstract class TransactionManager implements Closeable {
 
   // could cache instances
   public static TransactionManager get(Configuration conf) throws IOException {

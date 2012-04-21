@@ -46,6 +46,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
         String ownerNode = getOwnerNode(tranZNode);
         try {
           createWithParents(watcher, ownerNode, new byte[0], EPHEMERAL);
+          System.out.println("Acquired: "+id);
           return id;
         } catch (KeeperException.NoNodeException e) {
           /*

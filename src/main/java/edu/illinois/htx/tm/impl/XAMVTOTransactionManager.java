@@ -62,8 +62,19 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public void commit(XID xid) throws IOException {
-    super.commit(xid);
+  public void commit(XID xid, boolean onePhase) throws IOException {
+    if (onePhase) {
+      new WithReadLock() {
+        @Override
+        void execute(MVTOTransaction<K> ta) throws IOException {
+          XAMVTOTransaction<K> xta = (XAMVTOTransaction<K>) ta;
+          xta.setPrepared();
+          xta.commit();
+        }
+      }.run(xid);
+    } else {
+      super.commit(xid);
+    }
   }
 
   @Override

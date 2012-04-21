@@ -4,8 +4,8 @@ import static edu.illinois.htx.tm.TransactionState.ABORTED;
 import static edu.illinois.htx.tm.TransactionState.COMMITTED;
 import static edu.illinois.htx.tm.TransactionState.FINALIZED;
 import static edu.illinois.htx.tm.TransactionState.STARTED;
-import static edu.illinois.htx.tm.impl.LocalTransactionState.BLOCKED;
-import static edu.illinois.htx.tm.impl.LocalTransactionState.CREATED;
+import static edu.illinois.htx.tm.impl.TransientTransactionState.BLOCKED;
+import static edu.illinois.htx.tm.impl.TransientTransactionState.CREATED;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -48,17 +48,18 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   public final synchronized void begin() throws IOException {
-    checkBegin();
+    if (!shouldBegin())
+      return;
     long ts = getTimestampManager().acquire();
     TID id = new TID(ts);
     long sid = getTransactionLog().appendStateTransition(id, STARTED);
     setStarted(id, sid);
   }
 
-  protected void checkBegin() {
+  protected boolean shouldBegin() {
     switch (state) {
     case CREATED:
-      break;
+      return true;
     default:
       throw newISA("begin");
     }
@@ -73,18 +74,20 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   public final synchronized void commit() throws TransactionAbortedException,
       IOException {
-    checkCommit();
+    if (!shouldCommit())
+      return;
     waitForReadFrom();
     getTransactionLog().appendStateTransition(id, COMMITTED);
     setCommitted();
+    finalizeCommit();
   }
 
-  protected void checkCommit() {
+  protected boolean shouldCommit() {
     switch (state) {
     case COMMITTED:
-      return;
+      return false;
     case STARTED:
-      break;
+      return true;
     default:
       throw newISA("commit");
     }
@@ -96,21 +99,22 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   public final synchronized void abort() throws IOException {
-    checkAbort();
+    if (!shouldAbort())
+      return;
     getTransactionLog().appendStateTransition(id, ABORTED);
     if (state == BLOCKED)
       notify();
     setAborted();
-    finalize();
+    finalizeAbort();
   }
 
-  protected void checkAbort() {
+  protected boolean shouldAbort() {
     switch (state) {
     case STARTED:
     case BLOCKED:
-      break;
+      return true;
     case ABORTED:
-      return;
+      return false;
     default:
       throw newISA("abort");
     }
@@ -124,7 +128,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   public final synchronized void finalize() throws IOException {
-    checkFinalize();
+    if (!shouldFinalize())
+      return;
     switch (state) {
     case COMMITTED:
       finalizeCommit();
@@ -135,13 +140,13 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  protected void checkFinalize() {
+  protected boolean shouldFinalize() {
     switch (state) {
     case COMMITTED:
     case ABORTED:
-      break;
+      return true;
     case FINALIZED:
-      return;
+      return false;
     default:
       throw newISA("finalize");
     }

@@ -10,7 +10,7 @@ public interface XATransactionManager {
 
   void prepare(XID xid) throws TransactionAbortedException, IOException;
 
-  void commit(XID xid) throws IOException;
+  void commit(XID xid, boolean onePhase) throws IOException;
 
   void abort(XID xid) throws IOException;
 

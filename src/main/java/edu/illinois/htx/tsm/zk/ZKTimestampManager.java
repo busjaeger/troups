@@ -12,6 +12,7 @@ import static edu.illinois.htx.tsm.zk.Util.join;
 import static org.apache.zookeeper.CreateMode.EPHEMERAL_SEQUENTIAL;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -28,9 +29,6 @@ import org.apache.zookeeper.KeeperException.NodeExistsException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.data.Stat;
-
-import com.google.common.base.Function;
-import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.tsm.NoSuchTimestampException;
 
@@ -63,16 +61,35 @@ public class ZKTimestampManager extends ZooKeeperListener implements
 
   @Override
   public long acquire() throws IOException {
+    Stat stat = new Stat();
+    try {
+      ZKUtil.getDataNoWatch(watcher, timestampsNode, stat);
+    } catch (KeeperException e1) {
+      e1.printStackTrace();
+    }
+    System.out.println("Cversion before: " + stat.getCversion());
+
+    long id;
     try {
       String tsNode = createWithParents(watcher, timestampsDir, new byte[0],
           EPHEMERAL_SEQUENTIAL);
-      return getId(tsNode);
+      id = getId(tsNode);
+      System.out.println("Acquired: " + id);
+
     } catch (KeeperException e) {
       throw new IOException(e);
     } catch (InterruptedException e) {
       Thread.interrupted();
       throw new IOException(e);
     }
+
+    try {
+      ZKUtil.getDataNoWatch(watcher, timestampsNode, stat);
+    } catch (KeeperException e1) {
+      e1.printStackTrace();
+    }
+    System.out.println("Cversion after: " + stat.getCversion());
+    return id;
   }
 
   @Override
@@ -172,11 +189,12 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   public long getLastCreatedTimestamp() throws IOException {
     Stat stat = new Stat();
     try {
-      return ZKUtil.getDataNoWatch(watcher, timestampsNode, stat) == null ? 0
-          : stat.getCversion();
+      if (ZKUtil.getDataNoWatch(watcher, timestampsNode, stat) == null)
+        return 0;
     } catch (KeeperException e) {
       throw new IOException(e);
     }
+    return stat.getCversion();
   }
 
   @Override
@@ -189,13 +207,11 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     }
     if (children == null)
       return Collections.emptyList();
-    Collections.sort(children);
-    return Iterables.transform(children, new Function<String, Long>() {
-      @Override
-      public Long apply(String path) {
-        return Long.parseLong(ZKUtil.getNodeName(path));
-      }
-    });
+    List<Long> ids = new ArrayList<Long>(children.size());
+    for (String child : children)
+      ids.add(Util.getId(child));
+    Collections.sort(ids);
+    return ids;
   }
 
   @Override

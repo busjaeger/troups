@@ -39,11 +39,13 @@ public class HStateTransitionLogRecord extends HLogRecord implements
 
   @Override
   public void readFields(DataInput in) throws IOException {
+    super.readFields(in);
     state = in.readInt();
   }
 
   @Override
   public void write(DataOutput out) throws IOException {
+    super.write(out);
     out.writeInt(state);
   }
 

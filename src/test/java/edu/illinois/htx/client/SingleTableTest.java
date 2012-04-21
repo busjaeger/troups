@@ -67,8 +67,8 @@ public class SingleTableTest {
     try {
       Put put = new Put(row1).add(familyName, qualifierName, toBytes(400L));
       table.put(ta, put);
-//      Put put2 = new Put(row2).add(familyName, qualifierName, toBytes(600L));
-//      table.put(ta, put2);
+      // Put put2 = new Put(row2).add(familyName, qualifierName, toBytes(600L));
+      // table.put(ta, put2);
       ta.commit();
     } catch (TransactionAbortedException e) {
       throw e;
@@ -81,8 +81,8 @@ public class SingleTableTest {
 
     ta = tm.begin();
     try {
-//      Put put = new Put(row1).add(familyName, qualifierName, toBytes(400L));
-//      table.put(ta, put);
+      // Put put = new Put(row1).add(familyName, qualifierName, toBytes(400L));
+      // table.put(ta, put);
       Put put2 = new Put(row2).add(familyName, qualifierName, toBytes(600L));
       table.put(ta, put2);
       ta.commit();
@@ -126,6 +126,8 @@ public class SingleTableTest {
     }
 
     table.close();
+    tm.close();
+    System.out.println("success");
   }
 
   @After

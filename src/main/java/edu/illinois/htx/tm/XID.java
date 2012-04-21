@@ -5,8 +5,9 @@ import java.io.DataOutput;
 import java.io.IOException;
 
 import org.apache.hadoop.io.DataInputBuffer;
+import org.apache.hadoop.io.Writable;
 
-public class XID extends TID {
+public class XID extends TID implements Writable {
 
   private long pid;
 
@@ -15,8 +16,8 @@ public class XID extends TID {
     super();
   }
 
-  public XID(long timestamp, long pid) {
-    super(timestamp);
+  public XID(long ts, long pid) {
+    super(ts);
     this.pid = pid;
   }
 
@@ -65,6 +66,7 @@ public class XID extends TID {
 
   @Override
   public void readFields(DataInput in) throws IOException {
+    super.readFields(in);
     pid = in.readLong();
   }
 

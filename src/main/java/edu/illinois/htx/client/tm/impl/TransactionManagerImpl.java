@@ -59,4 +59,9 @@ public class TransactionManagerImpl extends TransactionManager {
     ta.commit();
   }
 
+  @Override
+  public void close() throws IOException {
+    pool.shutdown();
+  }
+
 }

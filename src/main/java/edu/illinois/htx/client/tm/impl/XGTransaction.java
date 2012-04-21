@@ -126,6 +126,29 @@ class XGTransaction extends AbstractTransaction implements Transaction,
       throw newISA("commit");
     }
 
+    if (groups.size() == 1)
+      onePhaseCommit();
+    else
+      twoPhaseCommit();
+
+    // clean up timestamp (not necessary, but improves performance)
+    try {
+      stsm.release(id.getTS());
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
+
+  private void onePhaseCommit() {
+    Entry<RowGroup, XID> group = groups.entrySet().iterator().next();
+    try {
+      getRTM(group.getKey()).commit(group.getValue(), true);
+    } catch (IOException e) {
+      throw new RuntimeException("Failed to commit", e);
+    }
+  }
+
+  private void twoPhaseCommit() throws TransactionAbortedException {
     // 1. Phase: Prepare - any failure can rollback the transaction
     Throwable error = invokeAllPrepare();
     if (error != null) {
@@ -162,7 +185,7 @@ class XGTransaction extends AbstractTransaction implements Transaction,
         commitCalls.add(new Callable<RowGroup>() {
           @Override
           public RowGroup call() throws Exception {
-            getRTM(entry.getKey()).commit(entry.getValue());
+            getRTM(entry.getKey()).commit(entry.getValue(), false);
             return entry.getKey();
           }
         });
@@ -192,13 +215,6 @@ class XGTransaction extends AbstractTransaction implements Transaction,
           e.printStackTrace();
         }
       }
-    }
-
-    // clean up timestamp (not necessary, but improves performance)
-    try {
-      stsm.release(id.getTS());
-    } catch (IOException e) {
-      e.printStackTrace();
     }
   }
 
