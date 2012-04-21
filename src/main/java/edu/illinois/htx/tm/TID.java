@@ -4,6 +4,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.Writable;
 
 public class TID implements Comparable<TID>, Writable {
@@ -14,9 +15,20 @@ public class TID implements Comparable<TID>, Writable {
   public TID() {
     super();
   }
-  
+
   public TID(long ts) {
     this.ts = ts;
+  }
+
+  public TID(byte[] bytes) {
+    DataInputBuffer in = new DataInputBuffer();
+    in.reset(bytes, bytes.length);
+    try {
+      readFields(in);
+      in.close();
+    } catch (IOException e) {
+      throw new IllegalArgumentException(e);
+    }
   }
 
   public long getTS() {

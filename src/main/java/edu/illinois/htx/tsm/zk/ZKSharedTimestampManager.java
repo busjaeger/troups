@@ -1,5 +1,6 @@
 package edu.illinois.htx.tsm.zk;
 
+import static edu.illinois.htx.tsm.zk.Util.create;
 import static edu.illinois.htx.tsm.zk.Util.createWithParents;
 import static edu.illinois.htx.tsm.zk.Util.getId;
 import static edu.illinois.htx.tsm.zk.Util.join;
@@ -36,7 +37,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
       while (true) {
         String tranZNode;
         try {
-          tranZNode = createWithParents(watcher, timestampNode, new byte[0],
+          tranZNode = createWithParents(watcher, timestampsDir, new byte[0],
               PERSISTENT_SEQUENTIAL);
         } catch (KeeperException e) {
           throw new IOException(e);
@@ -68,9 +69,14 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
   // override to delete recursively
   @Override
   public boolean release(long ts) throws IOException {
-    String tranNode = join(timestampsNode, ts);
+    String tsNode = join(timestampsNode, ts);
     try {
-      ZKUtil.deleteNodeRecursively(watcher, tranNode);
+      try {
+        return ZKUtil.deleteNode(watcher, tsNode, -1);
+      } catch (KeeperException.NotEmptyException e) {
+        //
+      }
+      ZKUtil.deleteNodeRecursively(watcher, tsNode);
       return true;
     } catch (KeeperException.NoNodeException e) {
       return false;
@@ -172,9 +178,10 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
 
   @Override
   public long acquireReference(long ts) throws IOException {
-    String refNode = Util.join(timestampsNode, ts, "t");
+    String tsNode = Util.join(timestampsNode, ts);
+    String tsDir = Util.toDir(tsNode);
     try {
-      String partNode = Util.create(watcher, refNode, new byte[0],
+      String partNode = create(watcher, tsDir, new byte[0],
           EPHEMERAL_SEQUENTIAL);
       return getId(partNode);
     } catch (KeeperException.NoNodeException e) {
@@ -255,7 +262,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
   }
 
   protected String getOwnerNode(String tsNode) {
-    return join(tsNode, "owner");
+    return join(tsNode, "o");
   }
 
 }

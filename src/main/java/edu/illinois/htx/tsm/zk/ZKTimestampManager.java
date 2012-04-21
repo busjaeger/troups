@@ -39,7 +39,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
 
   protected final List<TimestampReclamationListener> listeners;
   protected final String timestampsNode;
-  protected final String timestampNode;
+  protected final String timestampsDir;
   // last reclaimed timestamp node
   protected final String lrtNode;
 
@@ -53,7 +53,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     String lrt = conf.get(ZOOKEEPER_ZNODE_LRT, DEFAULT_ZOOKEEPER_ZNODE_LRT);
     String baseNode = join(zkw.baseZNode, base);
     this.timestampsNode = join(baseNode, timestamps);
-    this.timestampNode = join(baseNode, "t");
+    this.timestampsDir = Util.toDir(timestampsNode);
     this.lrtNode = join(baseNode, lrt);
   }
 
@@ -64,7 +64,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   @Override
   public long acquire() throws IOException {
     try {
-      String tsNode = createWithParents(watcher, timestampNode, new byte[0],
+      String tsNode = createWithParents(watcher, timestampsDir, new byte[0],
           EPHEMERAL_SEQUENTIAL);
       return getId(tsNode);
     } catch (KeeperException e) {
@@ -111,8 +111,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   public boolean release(long ts) throws NoSuchTimestampException, IOException {
     String tsNode = join(timestampsNode, ts);
     try {
-      ZKUtil.deleteNode(watcher, tsNode);
-      return true;
+      return ZKUtil.deleteNode(watcher, tsNode, -1);
     } catch (KeeperException.NoNodeException e) {
       return false;
     } catch (KeeperException e) {
@@ -188,6 +187,8 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     } catch (KeeperException e) {
       throw new IOException();
     }
+    if (children == null)
+      return Collections.emptyList();
     Collections.sort(children);
     return Iterables.transform(children, new Function<String, Long>() {
       @Override

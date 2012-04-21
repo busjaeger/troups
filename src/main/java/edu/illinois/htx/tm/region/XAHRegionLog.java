@@ -11,12 +11,12 @@ import java.util.concurrent.ExecutorService;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.HRegionInfo;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.TableExistsException;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 
 import edu.illinois.htx.tm.XATransactionState;
 import edu.illinois.htx.tm.XID;
@@ -26,7 +26,7 @@ import edu.illinois.htx.tm.log.XAStateTransitionLogRecord;
 public class XAHRegionLog extends HRegionLog implements XALog<HKey, HLogRecord> {
 
   public static XAHRegionLog newInstance(HConnection connection,
-      ExecutorService pool, HRegionInfo regionInfo) throws IOException {
+      ExecutorService pool, HRegion region) throws IOException {
     Configuration conf = connection.getConfiguration();
     byte[] tableName = toBytes(conf.get(TM_LOG_TABLE_NAME,
         DEFAULT_TM_LOG_TABLE_NAME));
@@ -44,12 +44,12 @@ public class XAHRegionLog extends HRegionLog implements XALog<HKey, HLogRecord> 
       }
     }
     HTable table = new HTable(tableName, connection, pool);
-    return new XAHRegionLog(table, family, pool, regionInfo);
+    return new XAHRegionLog(table, family, pool, region);
   }
 
   XAHRegionLog(HTable table, byte[] family, ExecutorService pool,
-      HRegionInfo regionInfo) {
-    super(table, family, pool, regionInfo);
+      HRegion region) {
+    super(table, family, pool, region);
   }
 
   @Override
@@ -64,6 +64,8 @@ public class XAHRegionLog extends HRegionLog implements XALog<HKey, HLogRecord> 
 
   @Override
   protected boolean isStarted(HLogRecord record) {
+    if (super.isStarted(record))
+      return true;
     return record.getType() == XALog.RECORD_TYPE_XA_STATE_TRANSITION
         && ((XAStateTransitionLogRecord) record).getTransactionState() == XATransactionState.JOINED;
   }

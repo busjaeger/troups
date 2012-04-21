@@ -4,6 +4,8 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+import org.apache.hadoop.io.DataInputBuffer;
+
 public class XID extends TID {
 
   private long pid;
@@ -16,6 +18,17 @@ public class XID extends TID {
   public XID(long timestamp, long pid) {
     super(timestamp);
     this.pid = pid;
+  }
+
+  public XID(byte[] bytes) {
+    DataInputBuffer in = new DataInputBuffer();
+    in.reset(bytes, bytes.length);
+    try {
+      readFields(in);
+      in.close();
+    } catch (IOException e) {
+      throw new IllegalArgumentException(e);
+    }
   }
 
   public long getPid() {

@@ -18,6 +18,7 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.DataOutputBuffer;
 
@@ -29,6 +30,7 @@ import edu.illinois.htx.tm.log.StateTransitionLogRecord;
 
 public class HRegionLog implements Log<HKey, HLogRecord> {
 
+  private final HRegion region;
   private final HRegionInfo regionInfo;
   // don't need to close log table, since we are using our own connection
   private final HTable logTable;
@@ -37,9 +39,9 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
   private final Map<TID, byte[]> rows;
   private final Map<TID, HLogRecord> begins;
 
-  HRegionLog(HTable table, byte[] family, ExecutorService pool,
-      HRegionInfo regionInfo) {
-    this.regionInfo = regionInfo;
+  HRegionLog(HTable table, byte[] family, ExecutorService pool, HRegion region) {
+    this.region = region;
+    this.regionInfo = region.getRegionInfo();
     this.family = family;
     this.logTable = table;
     this.sid = new AtomicLong(0);
@@ -138,10 +140,13 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
     // TODO use split policy
     List<Put> puts = new ArrayList<Put>(2);
     HLogRecord beginRecord = begins.remove(tid);
-    if (beginRecord != null && beginRecord instanceof OperationLogRecord) {
+    if (beginRecord != null && record instanceof OperationLogRecord) {
       @SuppressWarnings("unchecked")
       OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
-      rows.put(tid, oplr.getKey().getRow());
+      byte[] row = oplr.getKey().getRow();
+      row = HRegionTransactionManager.getSplitRow(region.getConf(),
+          region.getTableDesc(), row);
+      rows.put(tid, row);
       Put beginPut = newPut(beginRecord);
       puts.add(beginPut);
     }

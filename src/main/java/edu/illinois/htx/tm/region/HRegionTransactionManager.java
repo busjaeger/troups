@@ -18,7 +18,7 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
-import org.apache.hadoop.hbase.HRegionInfo;
+import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
@@ -37,7 +37,6 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
-import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.util.ReflectionUtils;
 
 import com.google.common.base.Function;
@@ -67,6 +66,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   private final List<LifecycleListener> lifecycleListeners = new CopyOnWriteArrayList<LifecycleListener>();
   private final List<TransactionOperationObserver<HKey>> observers = new CopyOnWriteArrayList<TransactionOperationObserver<HKey>>();
+  private boolean started = false;
   private HRegion region;
   private ObservingTransactionManager<HKey> tm;
   private ZKSharedTimestampManager tsm;
@@ -78,6 +78,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   @Override
   public void start(CoprocessorEnvironment e) throws IOException {
     RegionCoprocessorEnvironment env = ((RegionCoprocessorEnvironment) e);
+    if (env.getRegion().getRegionInfo().isMetaTable())
+      return;
+
     Configuration conf = env.getConfiguration();
     ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
     region = env.getRegion();
@@ -87,37 +90,35 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     pool = Executors.newScheduledThreadPool(count);
 
     // start time-stamp manager
-    ZKSharedTimestampManager tsm = new ZKSharedTimestampManager(zkw);
-    tsm.start();
+    tsm = new ZKSharedTimestampManager(zkw);
+    tsm.addTimestampReclamationListener(this);
 
     // create transaction manager
-    HRegionInfo regionInfo = region.getRegionInfo();
     HConnection connection = env.getRegionServerServices().getCatalogTracker()
         .getConnection();
-    XAHRegionLog tlog = XAHRegionLog.newInstance(connection, pool, regionInfo);
+    XAHRegionLog tlog = XAHRegionLog.newInstance(connection, pool, region);
     tm = new XAMVTOTransactionManager<HKey, HLogRecord>(this, tlog, tsm);
 
     // create timestamp collector
     collector = new TimestampReclaimer(tsm, conf, pool, zkw);
+    started = true;
   }
 
   @Override
   public void preOpen(ObserverContext<RegionCoprocessorEnvironment> ctx) {
-    tsm.addTimestampReclamationListener(this);
+    if (!started)
+      return;
     tsm.start();
     for (LifecycleListener listener : lifecycleListeners)
       listener.starting();
-    try {
-      collector.start();
-    } catch (IOException e) {
-      // either aborts region server or removes co-processor
-      throw new IllegalStateException(e);
-    }
+    collector.start();
   }
 
   @Override
   public void preClose(ObserverContext<RegionCoprocessorEnvironment> e,
       boolean abortRequested) {
+    if (!started)
+      return;
     for (LifecycleListener listener : lifecycleListeners)
       if (abortRequested)
         listener.aborting();
@@ -287,19 +288,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   private static TID getTID(OperationWithAttributes operation) {
     byte[] tidBytes = operation.getAttribute(Constants.ATTR_NAME_TID);
-    if (tidBytes == null)
-      return null;
-    boolean isXid = getBoolean(operation, Constants.ATTR_NAME_XID);
-    TID tid = isXid ? new XID() : new TID();
-    DataInputBuffer in = new DataInputBuffer();
-    in.reset(tidBytes, tidBytes.length);
-    try {
-      tid.readFields(in);
-      in.close();
-    } catch (IOException e) {
-      throw new IllegalArgumentException(e);
-    }
-    return tid;
+    if (tidBytes != null)
+      return new TID(tidBytes);
+    tidBytes = operation.getAttribute(Constants.ATTR_NAME_XID);
+    if (tidBytes != null)
+      return new XID(tidBytes);
+    return null;
   }
 
   private static boolean getBoolean(OperationWithAttributes operation,
@@ -425,14 +419,19 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         }));
   }
 
+  public static byte[] getSplitRow(HTable table, byte[] row) throws IOException {
+    return getSplitRow(table.getConfiguration(), table.getTableDescriptor(),
+        row);
+  }
+
   /*
    * note if anything forbids instantiating the split policy on the client, we
    * need to make the RowKeySplitPolicy a separate metadata attribute on the
    * table
    */
-  public static byte[] getSplitRow(HTable table, byte[] row) throws IOException {
-    String rspClass = table.getTableDescriptor()
-        .getRegionSplitPolicyClassName();
+  public static byte[] getSplitRow(Configuration conf,
+      HTableDescriptor tableDescriptor, byte[] row) throws IOException {
+    String rspClass = tableDescriptor.getRegionSplitPolicyClassName();
     if (rspClass != null) {
       try {
         Class<?> cls = Class.forName(rspClass);
@@ -440,7 +439,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
           @SuppressWarnings("unchecked")
           Class<? extends RowGroupSplitPolicy> rspCls = (Class<? extends RowGroupSplitPolicy>) cls;
           RowGroupSplitPolicy splitPolicy = ReflectionUtils.newInstance(rspCls,
-              table.getConfiguration());
+              conf);
           return splitPolicy.getSplitRow(row);
         }
       } catch (ClassNotFoundException e) {

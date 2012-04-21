@@ -46,9 +46,9 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     checkJoin();
     long ts = id.getTS();
     long pid = getTimestampManager().acquireReference(ts);
-    getTimestampManager().addTimestampListener(ts, this);
-    long sid = getTransactionLog().appendXAStateTransition(getID(), JOINED);
     XID xid = new XID(ts, pid);
+    getTimestampManager().addTimestampListener(ts, this);
+    long sid = getTransactionLog().appendXAStateTransition(xid, JOINED);
     setJoined(xid, sid);
   }
 

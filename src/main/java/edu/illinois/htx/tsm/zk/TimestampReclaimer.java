@@ -50,17 +50,17 @@ public class TimestampReclaimer implements Runnable {
     this.interval = conf.getLong(TM_TSC_INTERVAL, DEFAULT_TM_TSC_INTERVAL);
   }
 
-  public void start() throws IOException {
+  public void start() {
     try {
       zNode = createWithParents(toDir(collectorsNode), new byte[0],
           CreateMode.EPHEMERAL_SEQUENTIAL);
+      tryToBecomeCollector();
     } catch (KeeperException e) {
-      throw new IOException(e);
+      throw new RuntimeException(e);
     } catch (InterruptedException e) {
       Thread.interrupted();
-      throw new IOException(e);
+      throw new RuntimeException(e);
     }
-    tryToBecomeCollector();
   }
 
   protected String createWithParents(String znode, byte[] data, CreateMode mode)
@@ -76,48 +76,43 @@ public class TimestampReclaimer implements Runnable {
     }
   }
 
-  private void tryToBecomeCollector() throws IOException {
+  private void tryToBecomeCollector() throws KeeperException,
+      InterruptedException {
     if (becomeCollector()) {
       pool.scheduleAtFixedRate(this, interval, interval, TimeUnit.MILLISECONDS);
     }
   }
 
-  private boolean becomeCollector() throws IOException {
-    try {
-      List<String> children = ZKUtil.listChildrenNoWatch(zkw, collectorsNode);
-      String preceeding = null;
-      // loop until we are the leader or we follow someone
-      while (true) {
-        for (String child : children)
-          if (child.compareTo(zNode) < 0)
-            if (preceeding == null || preceeding.compareTo(child) < 0)
-              preceeding = child;
-        // this is the leader
-        if (preceeding == null)
-          return true;
-        if (setWatch(zkw, preceeding, new Watcher() {
-          @Override
-          public void process(WatchedEvent event) {
-            switch (event.getType()) {
-            case NodeDeleted:
-              try {
-                tryToBecomeCollector();
-              } catch (IOException e) {
-                e.printStackTrace();
-              }
-              break;
-            default:
-              break;
+  private boolean becomeCollector() throws KeeperException,
+      InterruptedException {
+    List<String> children = ZKUtil.listChildrenNoWatch(zkw, collectorsNode);
+    String preceeding = null;
+    // loop until we are the leader or we follow someone
+    while (true) {
+      for (String child : children)
+        if (child.compareTo(zNode) < 0)
+          if (preceeding == null || preceeding.compareTo(child) < 0)
+            preceeding = child;
+      // this is the leader
+      if (preceeding == null)
+        return true;
+      if (setWatch(zkw, preceeding, new Watcher() {
+        @Override
+        public void process(WatchedEvent event) {
+          switch (event.getType()) {
+          case NodeDeleted:
+            try {
+              tryToBecomeCollector();
+            } catch (Exception e) {
+              e.printStackTrace();
             }
+            break;
+          default:
+            break;
           }
-        }))
-          break;
-      }
-    } catch (KeeperException e) {
-      throw new IOException(e);
-    } catch (InterruptedException e) {
-      Thread.interrupted();
-      throw new IOException(e);
+        }
+      }))
+        break;
     }
     return false;
   }

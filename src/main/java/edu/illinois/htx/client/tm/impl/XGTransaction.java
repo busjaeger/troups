@@ -58,7 +58,7 @@ class XGTransaction extends AbstractTransaction implements Transaction,
     case COMMITTED:
       throw newISA("begin");
     }
-    id = new TID(stsm.acquire());
+    id = new TID(stsm.acquireShared());
     state = State.ACTIVE;
   }
 

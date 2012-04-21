@@ -8,7 +8,6 @@ import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.io.WritableUtils;
 
-import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TID;
 
@@ -33,7 +32,7 @@ public abstract class AbstractTransaction implements Transaction {
 
   protected void setTID(OperationWithAttributes operation, TID tid) {
     byte[] tsBytes = WritableUtils.toByteArray(tid);
-    operation.setAttribute(Constants.ATTR_NAME_XID, tsBytes);
+    operation.setAttribute(getTIDAttr(), tsBytes);
   }
 
   protected abstract TID getTID(HTable table, byte[] row) throws IOException;
