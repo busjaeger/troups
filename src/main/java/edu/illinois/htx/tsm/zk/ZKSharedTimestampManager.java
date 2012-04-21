@@ -90,15 +90,22 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
   public boolean isReleased(long ts) throws IOException {
     String tsNode = join(timestampsNode, ts);
     try {
-      // if owner exists, the node is not released
+      Stat stat = new Stat();
+      byte[] data = ZKUtil.getDataNoWatch(watcher, tsNode, stat);
+      // if node doesn't exist, it's released
+      if (data == null)
+        return true;
+      // if node exists and is ephemeral, it has not been released
+      if (stat.getEphemeralOwner() != 0)
+        return false;
+      // if owner node exists, the node is not released
       String owner = getOwnerNode(tsNode);
       if (ZKUtil.checkExists(watcher, owner) != -1)
-        return true;
-      // otherwise check if persisted references present
-      byte[] data = ZKUtil.getData(watcher, tsNode);
-      if (data == null || data.length == 0)
         return false;
-      return !new References(data).getRIDs().isEmpty();
+      // otherwise check if persisted references present
+      if (data.length == 0)
+        return true;
+      return new References(data).getRIDs().isEmpty();
     } catch (KeeperException e) {
       throw new IOException(e);
     }
