@@ -79,7 +79,7 @@ public class SingleTableTest {
       // could retry here
     }
 
-    ta = tm.begin();
+    ta = tm.beginXG();
     try {
       // Put put = new Put(row1).add(familyName, qualifierName, toBytes(400L));
       // table.put(ta, put);

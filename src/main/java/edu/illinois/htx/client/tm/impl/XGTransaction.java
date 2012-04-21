@@ -146,6 +146,7 @@ class XGTransaction extends AbstractTransaction implements Transaction,
     } catch (IOException e) {
       throw new RuntimeException("Failed to commit", e);
     }
+    state = State.COMMITTED;
   }
 
   private void twoPhaseCommit() throws TransactionAbortedException {
@@ -216,6 +217,7 @@ class XGTransaction extends AbstractTransaction implements Transaction,
         }
       }
     }
+    state = State.COMMITTED;
   }
 
   /**
