@@ -89,7 +89,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
     pool = Executors.newScheduledThreadPool(count);
 
-    // start time-stamp manager
+    // create time-stamp manager
     tsm = new ZKSharedTimestampManager(zkw);
     tsm.addTimestampReclamationListener(this);
 
@@ -108,9 +108,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   public void preOpen(ObserverContext<RegionCoprocessorEnvironment> ctx) {
     if (!started)
       return;
-    tsm.start();
     for (LifecycleListener listener : lifecycleListeners)
       listener.starting();
+    tsm.start();
     collector.start();
   }
 
