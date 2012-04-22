@@ -238,6 +238,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
       }
   }
 
+  // TODO consider current position of active window
   @Override
   public int compare(Long o1, Long o2) {
     if (o1 < 0) {

@@ -544,10 +544,30 @@ public class MVTOTransactionManager<K extends Key, R extends LogRecord>
   @Override
   public void reclaimed(long ts) {
     updateReclaimables();
+    Long cutoff = null;
     for (MVTOTransaction<K> ta : getTransactions()) {
-      if (timestampManager.compare(ta.getID().getTS(), ts) <= 0)
+      long sid = ta.getSID();
+      if (timestampManager.compare(ta.getID().getTS(), ts) <= 0) {
+        // find the smallest sequence number of transactions that are reclaimed
+        if (cutoff == null || transactionLog.compare(cutoff, sid) < 0)
+          cutoff = sid;
         reclaim(ta);
+      } else {
+        if (cutoff == null)
+          break;
+        // if any transaction with higher timestamp (started later globally)
+        // has a lower sequence number (started earlier locally), increase the
+        // cutoff, because we don't want to discard its log records
+        if (transactionLog.compare(cutoff, sid) > 0)
+          cutoff = ta.getSID();
+      }
     }
+    if (cutoff != null)
+      try {
+        transactionLog.truncate(cutoff);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
   }
 
   private void updateReclaimables() {

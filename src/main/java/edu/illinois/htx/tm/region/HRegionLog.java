@@ -174,7 +174,7 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
    * any better way to do this?? It seems there is no 'delete' scanner API.
    */
   @Override
-  public void savepoint(long sid) throws IOException {
+  public void truncate(long sid) throws IOException {
     Scan scan = createScan();
     scan.setTimeRange(0L, sid);
     ResultScanner scanner = logTable.getScanner(scan);
@@ -207,5 +207,11 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
     Put put = new Put(row, timestamp);
     put.add(family, qualifier, value);
     return put;
+  }
+
+  // TODO consider overflow
+  @Override
+  public int compare(Long o1, Long o2) {
+    return o1.compareTo(o2);
   }
 }

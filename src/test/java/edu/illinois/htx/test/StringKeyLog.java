@@ -30,12 +30,17 @@ public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
   }
 
   @Override
-  public void savepoint(long sid) throws IOException {
+  public void truncate(long sid) throws IOException {
   }
 
   @Override
   public Iterable<StringKeyLogRecord> recover() throws IOException {
     return Collections.emptyList();
+  }
+
+  @Override
+  public int compare(Long o1, Long o2) {
+    return o1.compareTo(o2);
   }
 
 }
