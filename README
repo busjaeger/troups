@@ -1,5 +1,8 @@
 How to install:
 
+HTX_HOME: directory that contains htx source code (contains pom.xml)
+HBASE_HOME: directory that contains HBase binaries
+
 0. Prereq: install and configure HBase 0.92 in pseudo distributed mode
 
 1. build htx jar
