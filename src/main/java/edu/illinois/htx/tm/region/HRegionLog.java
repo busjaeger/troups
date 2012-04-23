@@ -1,5 +1,8 @@
 package edu.illinois.htx.tm.region;
 
+import static edu.illinois.htx.Constants.DEFAULT_TM_LOG_DISABLE_TRUNCATION;
+import static edu.illinois.htx.Constants.TM_LOG_DISABLE_TRUNCATION;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,6 +40,7 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
   // don't need to close log table, since we are using our own connection
   private final HTable logTable;
   private final byte[] family;
+  private final boolean tuncateDisabled;
   private final AtomicLong sid;
   private final Map<TID, byte[]> rows;
   private final Map<TID, HLogRecord> begins;
@@ -46,6 +50,8 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
     this.regionInfo = region.getRegionInfo();
     this.family = family;
     this.logTable = table;
+    this.tuncateDisabled = region.getConf().getBoolean(
+        TM_LOG_DISABLE_TRUNCATION, DEFAULT_TM_LOG_DISABLE_TRUNCATION);
     this.sid = new AtomicLong(0);
     this.rows = new ConcurrentHashMap<TID, byte[]>();
     this.begins = new ConcurrentHashMap<TID, HLogRecord>();
@@ -146,8 +152,7 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
       @SuppressWarnings("unchecked")
       OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
       byte[] row = oplr.getKey().getRow();
-      RowGroupPolicy strategy = RowGroupSplitPolicy
-          .getRowGroupStrategy(region);
+      RowGroupPolicy strategy = RowGroupSplitPolicy.getRowGroupStrategy(region);
       if (strategy != null)
         row = strategy.getGroupRow(row);
       rows.put(tid, row);
@@ -179,6 +184,8 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
    */
   @Override
   public void truncate(long sid) throws IOException {
+    if (tuncateDisabled)
+      return;
     Scan scan = createScan();
     scan.setTimeRange(0L, sid);
     ResultScanner scanner = logTable.getScanner(scan);

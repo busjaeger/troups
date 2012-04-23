@@ -26,6 +26,10 @@ public interface Constants {
 
   public static final String DEFAULT_TM_LOG_TABLE_FAMILY_NAME = "log";
 
+  public static final String TM_LOG_DISABLE_TRUNCATION = "htx.tm.log.truncate";
+
+  public static final boolean DEFAULT_TM_LOG_DISABLE_TRUNCATION = false;
+
   // ZooKeeper nodes
 
   public static final String ZOOKEEPER_ZNODE_BASE = "zookeeper.znode.base";
