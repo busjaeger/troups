@@ -18,12 +18,10 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
-import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HConnection;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
@@ -37,13 +35,11 @@ import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
-import org.apache.hadoop.util.ReflectionUtils;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.Constants;
-import edu.illinois.htx.client.tm.RowGroupSplitPolicy;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.LifecycleListener;
@@ -418,37 +414,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                 });
           }
         }));
-  }
-
-  public static byte[] getSplitRow(HTable table, byte[] row) throws IOException {
-    return getSplitRow(table.getConfiguration(), table.getTableDescriptor(),
-        row);
-  }
-
-  /*
-   * note if anything forbids instantiating the split policy on the client, we
-   * need to make the RowKeySplitPolicy a separate metadata attribute on the
-   * table
-   */
-  public static byte[] getSplitRow(Configuration conf,
-      HTableDescriptor tableDescriptor, byte[] row) throws IOException {
-    String rspClass = tableDescriptor.getRegionSplitPolicyClassName();
-    if (rspClass != null) {
-      try {
-        Class<?> cls = Class.forName(rspClass);
-        if (RowGroupSplitPolicy.class.isAssignableFrom(cls)) {
-          @SuppressWarnings("unchecked")
-          Class<? extends RowGroupSplitPolicy> rspCls = (Class<? extends RowGroupSplitPolicy>) cls;
-          RowGroupSplitPolicy splitPolicy = ReflectionUtils.newInstance(rspCls,
-              conf);
-          return splitPolicy.getSplitRow(row);
-        }
-      } catch (ClassNotFoundException e) {
-        // ignore
-      }
-    }
-    // by default each row is it's own row group
-    return row;
   }
 
 }

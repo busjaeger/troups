@@ -1,4 +1,4 @@
-package edu.illinois.htx.client;
+package edu.illinois.htx.itest;
 
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
@@ -16,6 +16,10 @@ import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 
+import edu.illinois.htx.client.Get;
+import edu.illinois.htx.client.HTable;
+import edu.illinois.htx.client.Put;
+import edu.illinois.htx.client.Result;
 import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.client.tm.TransactionManager;
 import edu.illinois.htx.tm.TransactionAbortedException;

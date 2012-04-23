@@ -3,19 +3,21 @@ package edu.illinois.htx.client.tm.impl;
 import java.io.IOException;
 
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.htx.Constants;
+import edu.illinois.htx.client.tm.RowGroupPolicy;
 import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tm.region.HRegionTransactionManager;
 import edu.illinois.htx.tm.region.RTM;
 
 public class LocalTransaction extends AbstractTransaction implements
     Transaction {
 
   private HTable table;
+  private RowGroupPolicy strategy;
   private byte[] row;
   private TID id;
   private boolean completed = false;
@@ -34,7 +36,8 @@ public class LocalTransaction extends AbstractTransaction implements
       RTM rtm = table.coprocessorProxy(RTM.class, row);
       this.id = rtm.begin();
       this.table = table;
-      this.row = row;
+      this.strategy = RowGroupSplitPolicy.getRowGroupStrategy(table);
+      this.row = strategy == null ? row : strategy.getGroupRow(row);
     }
     // otherwise ensure this transaction remains local
     else {
@@ -43,8 +46,9 @@ public class LocalTransaction extends AbstractTransaction implements
         throw new IllegalArgumentException(
             "Local transaction cannot span tables");
       // check same row group
-      byte[] rootRow = HRegionTransactionManager.getSplitRow(table, row);
-      if (!Bytes.equals(this.row, rootRow))
+      if (strategy != null)
+        row = strategy.getGroupRow(row);
+      if (!Bytes.equals(this.row, row))
         throw new IllegalArgumentException(
             "Local transaction cannot span row groups");
     }

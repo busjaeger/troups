@@ -12,16 +12,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
+import org.apache.hadoop.hbase.util.Bytes;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.Constants;
+import edu.illinois.htx.client.tm.RowGroupPolicy;
 import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.XID;
-import edu.illinois.htx.tm.region.HRegionTransactionManager;
 import edu.illinois.htx.tm.region.RTM;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
@@ -40,6 +42,7 @@ class XGTransaction extends AbstractTransaction implements Transaction,
   // mutable state
   private TID id;
   private final Map<RowGroup, XID> groups = new HashMap<RowGroup, XID>();
+  private final Map<String, RowGroupPolicy> strategies = new HashMap<String, RowGroupPolicy>();
   private State state;
 
   XGTransaction(SharedTimestampManager tsm, ExecutorService pool) {
@@ -75,9 +78,11 @@ class XGTransaction extends AbstractTransaction implements Transaction,
       throw newISA("enlist");
     }
 
-    // create row group
-    byte[] rootRow = HRegionTransactionManager.getSplitRow(table, row);
-    RowGroup group = new RowGroup(table, rootRow);
+    // determine row group
+    RowGroupPolicy strategy = getStrategy(table);
+    if (strategy != null)
+      row = strategy.getGroupRow(row);
+    RowGroup group = new RowGroup(table, row);
 
     // this is a new row group -> enlist RTM in transaction
     XID xid = groups.get(group);
@@ -328,4 +333,13 @@ class XGTransaction extends AbstractTransaction implements Transaction,
     return id.getTS() + " (" + state + ") " + groups.toString();
   }
 
+  private RowGroupPolicy getStrategy(HTable table) throws IOException {
+    byte[] bName = table.getTableName();
+    String name = Bytes.toString(bName);
+    RowGroupPolicy strategy = strategies.get(name);
+    if (strategy == null)
+      strategies.put(name,
+          strategy = RowGroupSplitPolicy.getRowGroupStrategy(table));
+    return strategy;
+  }
 }

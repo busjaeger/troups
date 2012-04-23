@@ -19,9 +19,11 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.regionserver.HRegion;
+import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.DataOutputBuffer;
 
+import edu.illinois.htx.client.tm.RowGroupPolicy;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionState;
 import edu.illinois.htx.tm.log.Log;
@@ -144,8 +146,10 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
       @SuppressWarnings("unchecked")
       OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
       byte[] row = oplr.getKey().getRow();
-      row = HRegionTransactionManager.getSplitRow(region.getConf(),
-          region.getTableDesc(), row);
+      RowGroupPolicy strategy = RowGroupSplitPolicy
+          .getRowGroupStrategy(region);
+      if (strategy != null)
+        row = strategy.getGroupRow(row);
       rows.put(tid, row);
       Put beginPut = newPut(beginRecord);
       puts.add(beginPut);
