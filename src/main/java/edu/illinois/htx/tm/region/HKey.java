@@ -20,7 +20,7 @@ public class HKey implements Key, Writable {
       return new HKey(kv);
     }
   };
-  
+
   protected byte[] row;
   protected byte[] family;
   protected byte[] qualifier;
@@ -31,11 +31,16 @@ public class HKey implements Key, Writable {
     super();
   }
 
+  public HKey(byte[] row) {
+    this.row = row;
+  }
+
   public HKey(KeyValue keyValue) {
     this(keyValue.getRow(), keyValue.getFamily(), keyValue.getQualifier());
   }
 
   public HKey(byte[] row, byte[] family, byte[] qualifier) {
+    assert row != null;
     this.row = row;
     this.family = family;
     this.qualifier = qualifier;
@@ -63,17 +68,33 @@ public class HKey implements Key, Writable {
   public boolean equals(Object obj) {
     if (obj instanceof HKey) {
       HKey k = (HKey) obj;
-      return Arrays.equals(row, k.row) && Arrays.equals(family, k.family)
-          && Arrays.equals(qualifier, k.qualifier);
+      if (!Arrays.equals(row, k.row))
+        return false;
+      if (!equalOrNull(family, k.family))
+        return false;
+      return equalOrNull(qualifier, k.qualifier);
     }
     return false;
+  }
+
+  private boolean equalOrNull(byte[] first, byte[] second) {
+    if (first == null && second == null)
+      return true;
+    if (first == null && second != null)
+      return false;
+    if (second == null && first != null)
+      return false;
+    return Arrays.equals(first, second);
   }
 
   @Override
   public int hashCode() {
     if (hash == null) {
-      hash = Arrays.hashCode(row) * Arrays.hashCode(family)
-          * Arrays.hashCode(qualifier);
+      hash = Arrays.hashCode(row);
+      if (family != null)
+        hash *= Arrays.hashCode(family);
+      if (qualifier != null)
+        hash *= Arrays.hashCode(qualifier);
     }
     return hash;
   }
@@ -87,8 +108,12 @@ public class HKey implements Key, Writable {
 
   private static void writeByteArray(byte[] b, DataOutput out)
       throws IOException {
-    out.writeInt(b.length);
-    out.write(b);
+    if (b == null) {
+      out.writeInt(-1);
+    } else {
+      out.writeInt(b.length);
+      out.write(b);
+    }
   }
 
   @Override
@@ -100,6 +125,8 @@ public class HKey implements Key, Writable {
 
   private static byte[] readByteArray(DataInput in) throws IOException {
     int len = in.readInt();
+    if (len == -1)
+      return null;
     byte[] b = new byte[len];
     in.readFully(b);
     return b;

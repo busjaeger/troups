@@ -31,6 +31,7 @@ import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.ipc.ProtocolSignature;
 import org.apache.hadoop.hbase.regionserver.HRegion;
 import org.apache.hadoop.hbase.regionserver.InternalScanner;
+import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 import org.apache.hadoop.hbase.regionserver.Store;
 import org.apache.hadoop.hbase.regionserver.wal.WALEdit;
 import org.apache.hadoop.hbase.util.Bytes;
@@ -40,16 +41,15 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
 import edu.illinois.htx.Constants;
+import edu.illinois.htx.client.tm.RowGroupPolicy;
+import edu.illinois.htx.tm.GroupTransactionOperationObserver;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.KeyVersions;
 import edu.illinois.htx.tm.LifecycleListener;
-import edu.illinois.htx.tm.ObservingTransactionManager;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tm.TransactionOperationObserver;
-import edu.illinois.htx.tm.XATransactionManager;
 import edu.illinois.htx.tm.XID;
-import edu.illinois.htx.tm.impl.XAMVTOTransactionManager;
+import edu.illinois.htx.tm.impl.MVTOCrossGroupTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampReclamationListener;
 import edu.illinois.htx.tsm.zk.TimestampReclaimer;
 import edu.illinois.htx.tsm.zk.ZKSharedTimestampManager;
@@ -61,10 +61,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       .getComparatorIgnoringTimestamps();
 
   private final List<LifecycleListener> lifecycleListeners = new CopyOnWriteArrayList<LifecycleListener>();
-  private final List<TransactionOperationObserver<HKey>> observers = new CopyOnWriteArrayList<TransactionOperationObserver<HKey>>();
+  private final List<GroupTransactionOperationObserver<HKey>> observers = new CopyOnWriteArrayList<GroupTransactionOperationObserver<HKey>>();
   private boolean started = false;
   private HRegion region;
-  private ObservingTransactionManager<HKey> tm;
+  private RowGroupPolicy groupPolicy;
+  private MVTOCrossGroupTransactionManager<HKey, HLogRecord> tm;
   private ZKSharedTimestampManager tsm;
   private ScheduledExecutorService pool;
   private TimestampReclaimer collector;
@@ -80,6 +81,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     Configuration conf = env.getConfiguration();
     ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
     region = env.getRegion();
+    groupPolicy = RowGroupSplitPolicy.getRowGroupStrategy(region);
 
     // create thread pool
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
@@ -92,8 +94,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // create transaction manager
     HConnection connection = env.getRegionServerServices().getCatalogTracker()
         .getConnection();
-    XAHRegionLog tlog = XAHRegionLog.newInstance(connection, pool, region);
-    tm = new XAMVTOTransactionManager<HKey, HLogRecord>(this, tlog, tsm);
+    HCrossGroupRegionLog tlog = HCrossGroupRegionLog.newInstance(connection,
+        pool, region);
+    tm = new MVTOCrossGroupTransactionManager<HKey, HLogRecord>(this, tlog, tsm);
 
     // create timestamp collector
     collector = new TimestampReclaimer(tsm, conf, pool, zkw);
@@ -133,13 +136,14 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       throw new IllegalArgumentException("timestamp does not match tid");
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
     // create an HKey set view on the family map
+    HKey groupKey = getGroupKey(put.getRow());
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), HRegionTransactionManager
         .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
     if (isDelete)
-      tm.beforeDelete(tid, keys);
+      tm.beforeDelete(tid, groupKey, keys);
     else
-      tm.beforePut(tid, keys);
+      tm.beforePut(tid, groupKey, keys);
   }
 
   @Override
@@ -149,13 +153,14 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (tid == null)
       return;
     boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
+    HKey groupKey = getGroupKey(put.getRow());
     Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
         .getFamilyMap().values(), HRegionTransactionManager
         .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
     if (isDelete)
-      tm.beforeDelete(tid, keys);
+      tm.beforeDelete(tid, groupKey, keys);
     else
-      tm.beforePut(tid, keys);
+      tm.beforePut(tid, groupKey, keys);
   }
 
   @Override
@@ -169,8 +174,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       throw new IllegalArgumentException(
           "timerange does not match tid: (expected: "
               + new TimeRange(0L, tid.getTS()) + "), (actual: " + tr);
+    HKey groupKey = getGroupKey(get.getRow());
     Iterable<HKey> keys = transform(get.getRow(), get.getFamilyMap());
-    tm.beforeGet(tid, keys);
+    tm.beforeGet(tid, groupKey, keys);
   }
 
   @Override
@@ -182,8 +188,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     // TODO check if results are already sorted by HBase; and verify newer
     // versions are sorted before older versions by Comparator
     Collections.sort(results, KeyValue.COMPARATOR);
+    HKey groupKey = getGroupKey(get.getRow());
     Iterable<KeyVersions<HKey>> kvs = transform(results);
-    tm.afterGet(tid, kvs);
+    tm.afterGet(tid, groupKey, kvs);
   }
 
   @Override
@@ -213,7 +220,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   @Override
   public void addTransactionOperationObserver(
-      TransactionOperationObserver<HKey> observer) {
+      GroupTransactionOperationObserver<HKey> observer) {
     observers.add(observer);
   }
 
@@ -223,8 +230,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public TID begin() throws IOException {
-    return tm.begin();
+  public TID begin(HKey groupKey) throws IOException {
+    return tm.begin(groupKey);
   }
 
   @Override
@@ -238,31 +245,23 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   }
 
   @Override
-  public XID join(TID tid) throws IOException {
-    if (!(tm instanceof XATransactionManager))
-      throw new IllegalStateException("distributed transactions not enabled");
-    return ((XATransactionManager) tm).join(tid);
+  public XID join(TID tid, HKey groupKey) throws IOException {
+    return tm.join(tid, groupKey);
   }
 
   @Override
-  public void prepare(XID tid) throws IOException {
-    if (!(tm instanceof XATransactionManager))
-      throw new IllegalStateException("distributed transactions not enabled");
-    ((XATransactionManager) tm).prepare(tid);
+  public void prepare(XID xid) throws IOException {
+    tm.prepare(xid);
   }
 
   @Override
   public void commit(XID xid, boolean onePhase) throws IOException {
-    if (!(tm instanceof XATransactionManager))
-      throw new IllegalStateException("distributed transactions not enabled");
-    ((XATransactionManager) tm).commit(xid, onePhase);
+    tm.commit(xid, onePhase);
   }
 
   @Override
   public void abort(XID xid) throws IOException {
-    if (!(tm instanceof XATransactionManager))
-      throw new IllegalStateException("distributed transactions not enabled");
-    ((XATransactionManager) tm).abort(xid);
+    tm.abort(xid);
   }
 
   @Override
@@ -414,6 +413,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                 });
           }
         }));
+  }
+
+  private HKey getGroupKey(byte[] row) {
+    return new HKey(groupPolicy == null ? row : groupPolicy.getGroupKey(row));
   }
 
 }

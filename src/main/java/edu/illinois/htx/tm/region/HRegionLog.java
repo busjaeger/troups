@@ -6,11 +6,9 @@ import static edu.illinois.htx.Constants.TM_LOG_DISABLE_TRUNCATION;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.NavigableMap;
 import java.util.SortedSet;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -22,49 +20,39 @@ import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.regionserver.HRegion;
-import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.DataOutputBuffer;
 
-import edu.illinois.htx.client.tm.RowGroupPolicy;
 import edu.illinois.htx.tm.TID;
-import edu.illinois.htx.tm.TransactionState;
 import edu.illinois.htx.tm.log.Log;
-import edu.illinois.htx.tm.log.OperationLogRecord;
-import edu.illinois.htx.tm.log.StateTransitionLogRecord;
 
 public class HRegionLog implements Log<HKey, HLogRecord> {
 
-  private final HRegion region;
   private final HRegionInfo regionInfo;
   // don't need to close log table, since we are using our own connection
   private final HTable logTable;
   private final byte[] family;
   private final boolean tuncateDisabled;
   private final AtomicLong sid;
-  private final Map<TID, byte[]> rows;
-  private final Map<TID, HLogRecord> begins;
 
   HRegionLog(HTable table, byte[] family, ExecutorService pool, HRegion region) {
-    this.region = region;
     this.regionInfo = region.getRegionInfo();
     this.family = family;
     this.logTable = table;
     this.tuncateDisabled = region.getConf().getBoolean(
         TM_LOG_DISABLE_TRUNCATION, DEFAULT_TM_LOG_DISABLE_TRUNCATION);
     this.sid = new AtomicLong(0);
-    this.rows = new ConcurrentHashMap<TID, byte[]>();
-    this.begins = new ConcurrentHashMap<TID, HLogRecord>();
   }
 
   @Override
   public Iterable<HLogRecord> recover() throws IOException {
     Scan scan = createScan();
+    byte[] table = regionInfo.getTableName();
+    scan.addColumn(family, table);
     ResultScanner scanner = logTable.getScanner(scan);
     SortedSet<HLogRecord> records = new TreeSet<HLogRecord>();
     for (Result result : scanner) {
-      NavigableMap<Long, byte[]> cells = result.getMap().get(family)
-          .get(regionInfo.getTableName());
+      NavigableMap<Long, byte[]> cells = result.getMap().get(family).get(table);
       for (byte[] rawRecord : cells.values()) {
         DataInputBuffer in = new DataInputBuffer();
         in.reset(rawRecord, rawRecord.length);
@@ -72,25 +60,8 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
         HLogRecord record = create(type);
         record.readFields(in);
         in.close();
+        record.setGroupKey(new HKey(result.getRow()));
         records.add(record);
-      }
-    }
-    // reconstruct in-memory state
-    for (HLogRecord record : records) {
-      TID tid = record.getTID();
-      if (isStarted(record)) {
-        begins.put(record.getTID(), record);
-        continue;
-      }
-      HLogRecord beginRecord = begins.remove(tid);
-      if (beginRecord != null && beginRecord instanceof OperationLogRecord) {
-        @SuppressWarnings("unchecked")
-        OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
-        rows.put(tid, oplr.getKey().getRow());
-      }
-      if (isFinalized(record)) {
-        begins.remove(tid);
-        rows.remove(tid);
       }
     }
     if (!records.isEmpty())
@@ -118,65 +89,53 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
   }
 
   @Override
-  public long appendStateTransition(TID tid, int state) throws IOException {
-    return append(new HStateTransitionLogRecord(nextSID(), tid, state));
+  public long appendStateTransition(TID tid, HKey groupKey, int state)
+      throws IOException {
+    HLogRecord record = new HStateTransitionLogRecord(nextSID(), tid, groupKey,
+        state);
+    return append(record);
   }
 
   @Override
-  public long appendGet(TID tid, HKey key, long version) throws IOException {
-    return append(new HGetLogRecord(nextSID(), tid, key, version));
+  public long appendGet(TID tid, HKey groupKey, HKey key, long version)
+      throws IOException {
+    HLogRecord record = new HGetLogRecord(nextSID(), tid, groupKey, key,
+        version);
+    return append(record);
   }
 
   @Override
-  public long appendPut(TID tid, HKey key) throws IOException {
-    return append(new HPutLogRecord(nextSID(), tid, key));
+  public long appendPut(TID tid, HKey groupKey, HKey key) throws IOException {
+    HLogRecord record = new HPutLogRecord(nextSID(), tid, groupKey, key);
+    return append(record);
   }
 
   @Override
-  public long appendDelete(TID tid, HKey key) throws IOException {
-    return append(new HDeleteLogRecord(nextSID(), tid, key));
+  public long appendDelete(TID tid, HKey groupKey, HKey key) throws IOException {
+    HLogRecord record = new HDeleteLogRecord(nextSID(), tid, groupKey, key);
+    return append(record);
   }
 
   protected long append(HLogRecord record) throws IOException {
-    TID tid = record.getTID();
-    // don't append begin, because we don't know the row yet
-    if (isStarted(record)) {
-      begins.put(tid, record);
-      return record.getSID();
-    }
+    // 1. serialize the log record - note: the group key is not serialized,
+    // since it's already used as the log table row key
+    DataOutputBuffer out = new DataOutputBuffer();
+    // write type so we know which class to create during recovery
+    out.writeInt(record.getType());
+    record.write(out);
+    out.close();
+    byte[] value = out.getData();
 
-    // TODO use split policy
-    List<Put> puts = new ArrayList<Put>(2);
-    HLogRecord beginRecord = begins.remove(tid);
-    if (beginRecord != null && record instanceof OperationLogRecord) {
-      @SuppressWarnings("unchecked")
-      OperationLogRecord<HKey> oplr = (OperationLogRecord<HKey>) record;
-      byte[] row = oplr.getKey().getRow();
-      RowGroupPolicy strategy = RowGroupSplitPolicy.getRowGroupStrategy(region);
-      if (strategy != null)
-        row = strategy.getGroupRow(row);
-      rows.put(tid, row);
-      Put beginPut = newPut(beginRecord);
-      puts.add(beginPut);
-    }
-    puts.add(newPut(record));
-    logTable.put(puts);
+    // 2. put to log table
+    byte[] row = record.getGroupKey().getRow();
+    long timestamp = record.getSID();
+    Put put = new Put(row, timestamp);
+    byte[] qualifier = regionInfo.getTableName();
+    put.add(family, qualifier, value);
+    logTable.put(put);
 
-    if (isFinalized(record)) {
-      begins.remove(tid);
-      rows.remove(tid);
-    }
+    // 3. return log record sequence ID
     return record.getSID();
-  }
-
-  protected boolean isStarted(HLogRecord record) {
-    return record.getType() == Log.RECORD_TYPE_STATE_TRANSITION
-        && ((StateTransitionLogRecord) record).getTransactionState() == TransactionState.STARTED;
-  }
-
-  protected boolean isFinalized(HLogRecord record) {
-    return record.getType() == Log.RECORD_TYPE_STATE_TRANSITION
-        && ((StateTransitionLogRecord) record).getTransactionState() == TransactionState.FINALIZED;
   }
 
   /*
@@ -204,20 +163,6 @@ public class HRegionLog implements Log<HKey, HLogRecord> {
     scan.setStopRow(regionInfo.getEndKey());
     scan.addFamily(family);
     return scan;
-  }
-
-  private Put newPut(HLogRecord record) throws IOException {
-    byte[] row = rows.get(record.getTID());
-    long timestamp = record.getSID();
-    byte[] qualifier = regionInfo.getTableName();
-    DataOutputBuffer out = new DataOutputBuffer();
-    out.writeInt(record.getType());
-    record.write(out);
-    out.close();
-    byte[] value = out.getData();
-    Put put = new Put(row, timestamp);
-    put.add(family, qualifier, value);
-    return put;
   }
 
   // TODO consider overflow

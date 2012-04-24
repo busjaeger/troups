@@ -1,6 +1,6 @@
 package edu.illinois.htx.tm;
 
-public interface XATransactionState extends TransactionState {
+public interface CrossGroupTransactionState extends GroupTransactionState {
 
   public static final int JOINED = 5;
   public static final int PREPARED = 6;

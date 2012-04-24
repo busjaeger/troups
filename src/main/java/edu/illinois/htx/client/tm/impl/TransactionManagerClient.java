@@ -18,12 +18,12 @@ import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.zk.ZKSharedTimestampManager;
 
-public class TransactionManagerImpl extends TransactionManager {
+public class TransactionManagerClient extends TransactionManager {
 
   private final SharedTimestampManager stsm;
   private final ExecutorService pool;
 
-  public TransactionManagerImpl(Configuration conf) throws IOException {
+  public TransactionManagerClient(Configuration conf) throws IOException {
     HConnection connection = HConnectionManager.getConnection(conf);
     @SuppressWarnings("deprecation")
     ZooKeeperWatcher zkw = connection.getZooKeeperWatcher();
@@ -35,12 +35,12 @@ public class TransactionManagerImpl extends TransactionManager {
 
   @Override
   public Transaction begin() {
-    return new LocalTransaction();
+    return new GroupTransaction();
   }
 
   @Override
   public Transaction beginXG() {
-    XGTransaction tran = new XGTransaction(stsm, pool);
+    CrossGroupTransaction tran = new CrossGroupTransaction(stsm, pool);
     try {
       tran.begin();
     } catch (IOException e) {

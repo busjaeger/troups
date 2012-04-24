@@ -1,9 +1,9 @@
 package edu.illinois.htx.tm.log;
 
+import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.TID;
 
-
-public interface LogRecord {
+public interface LogRecord<K extends Key> {
 
   /**
    * log sequence number
@@ -26,4 +26,10 @@ public interface LogRecord {
    */
   int getType();
 
+  /**
+   * Group key of this log record
+   * 
+   * @return
+   */
+  K getGroupKey();
 }

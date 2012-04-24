@@ -10,7 +10,7 @@ import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.StateTransitionLogRecord;
 
 public class HStateTransitionLogRecord extends HLogRecord implements
-    StateTransitionLogRecord {
+    StateTransitionLogRecord<HKey> {
 
   private int state;
 
@@ -18,8 +18,8 @@ public class HStateTransitionLogRecord extends HLogRecord implements
     super(RECORD_TYPE_STATE_TRANSITION);
   }
 
-  HStateTransitionLogRecord(long sid, TID tid, int state) {
-    super(RECORD_TYPE_STATE_TRANSITION, sid, tid);
+  HStateTransitionLogRecord(long sid, TID tid, HKey groupKey, int state) {
+    super(RECORD_TYPE_STATE_TRANSITION, sid, tid, groupKey);
     this.state = state;
   }
 
@@ -27,8 +27,9 @@ public class HStateTransitionLogRecord extends HLogRecord implements
     super(type);
   }
 
-  HStateTransitionLogRecord(int type, long sid, TID tid, int state) {
-    super(type, sid, tid);
+  HStateTransitionLogRecord(int type, long sid, TID tid, HKey groupKey,
+      int state) {
+    super(type, sid, tid, groupKey);
     this.state = state;
   }
 

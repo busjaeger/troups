@@ -2,11 +2,11 @@ package edu.illinois.htx.tm;
 
 import java.io.IOException;
 
-public interface XATransactionManager {
+public interface CrossGroupTransactionManager<K extends Key> {
 
   public static final long VERSION = 1L;
 
-  XID join(TID tid) throws IOException;
+  XID join(TID tid, K groupKey) throws IOException;
 
   void prepare(XID xid) throws TransactionAbortedException, IOException;
 

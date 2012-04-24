@@ -15,7 +15,7 @@ public class CharDelimiterSplitPolicy implements RowGroupPolicy {
   }
 
   @Override
-  public byte[] getGroupRow(byte[] row) {
+  public byte[] getGroupKey(byte[] row) {
     String s = Bytes.toString(row);
     int idx = s.indexOf(delimiter);
     if (idx != -1)

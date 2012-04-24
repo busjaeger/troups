@@ -9,8 +9,8 @@ public class HDeleteLogRecord extends HOperationLogRecord {
     super(Log.RECORD_TYPE_DELETE);
   }
 
-  public HDeleteLogRecord(long sid, TID tid, HKey key) {
-    super(Log.RECORD_TYPE_DELETE, sid, tid, key);
+  public HDeleteLogRecord(long sid, TID tid, HKey groupKey, HKey key) {
+    super(Log.RECORD_TYPE_DELETE, sid, tid, groupKey, key);
   }
 
 }

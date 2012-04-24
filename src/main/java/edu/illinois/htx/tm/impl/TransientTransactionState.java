@@ -1,8 +1,8 @@
 package edu.illinois.htx.tm.impl;
 
-import edu.illinois.htx.tm.TransactionState;
+import edu.illinois.htx.tm.GroupTransactionState;
 
-interface TransientTransactionState extends TransactionState {
+interface TransientTransactionState extends GroupTransactionState {
   public static final int CREATED = 7;
   public static final int BLOCKED = 8;
 }

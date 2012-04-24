@@ -9,23 +9,31 @@ import edu.illinois.htx.tm.log.Log;
 public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
 
   @Override
-  public long appendStateTransition(TID tid, int state) throws IOException {
+  public int compare(Long o1, Long o2) {
     return 0;
   }
 
   @Override
-  public long appendGet(TID tid, StringKey key, long version)
+  public long appendStateTransition(TID tid, StringKey groupKey, int state)
       throws IOException {
     return 0;
   }
 
   @Override
-  public long appendPut(TID tid, StringKey key) throws IOException {
+  public long appendGet(TID tid, StringKey groupKey, StringKey key, long version)
+      throws IOException {
     return 0;
   }
 
   @Override
-  public long appendDelete(TID tid, StringKey key) throws IOException {
+  public long appendPut(TID tid, StringKey groupKey, StringKey key)
+      throws IOException {
+    return 0;
+  }
+
+  @Override
+  public long appendDelete(TID tid, StringKey groupKey, StringKey key)
+      throws IOException {
     return 0;
   }
 
@@ -36,11 +44,6 @@ public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
   @Override
   public Iterable<StringKeyLogRecord> recover() throws IOException {
     return Collections.emptyList();
-  }
-
-  @Override
-  public int compare(Long o1, Long o2) {
-    return o1.compareTo(o2);
   }
 
 }

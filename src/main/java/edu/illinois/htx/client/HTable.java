@@ -6,9 +6,7 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.util.Bytes;
 
-import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.Transaction;
 
 public class HTable implements Closeable {
@@ -52,9 +50,8 @@ public class HTable implements Closeable {
    * marker that is interpreted by our Coprocessor.
    */
   public void delete(Transaction ta, Delete delete) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = ta.createPut(hTable,
+    org.apache.hadoop.hbase.client.Put hPut = ta.createDelete(hTable,
         delete.getRow());
-    hPut.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);

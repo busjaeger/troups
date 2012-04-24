@@ -24,7 +24,7 @@ public class RowGroupSplitPolicy extends ConstantSizeRegionSplitPolicy {
 
   @Override
   byte[] getSplitPoint() {
-    return strategy.getGroupRow(super.getSplitPoint());
+    return strategy.getGroupKey(super.getSplitPoint());
   }
 
   // server-side API

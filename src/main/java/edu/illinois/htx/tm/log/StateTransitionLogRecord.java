@@ -1,6 +1,8 @@
 package edu.illinois.htx.tm.log;
 
-public interface StateTransitionLogRecord extends LogRecord {
+import edu.illinois.htx.tm.Key;
+
+public interface StateTransitionLogRecord<K extends Key> extends LogRecord<K> {
 
   int getTransactionState();
 

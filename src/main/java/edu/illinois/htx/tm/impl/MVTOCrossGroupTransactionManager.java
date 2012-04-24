@@ -1,7 +1,7 @@
 package edu.illinois.htx.tm.impl;
 
-import static edu.illinois.htx.tm.XATransactionState.JOINED;
-import static edu.illinois.htx.tm.XATransactionState.PREPARED;
+import static edu.illinois.htx.tm.CrossGroupTransactionState.JOINED;
+import static edu.illinois.htx.tm.CrossGroupTransactionState.PREPARED;
 import static edu.illinois.htx.tm.log.Log.RECORD_TYPE_STATE_TRANSITION;
 
 import java.io.IOException;
@@ -9,19 +9,20 @@ import java.io.IOException;
 import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.TID;
-import edu.illinois.htx.tm.XATransactionManager;
+import edu.illinois.htx.tm.CrossGroupTransactionManager;
 import edu.illinois.htx.tm.XID;
 import edu.illinois.htx.tm.log.LogRecord;
 import edu.illinois.htx.tm.log.StateTransitionLogRecord;
-import edu.illinois.htx.tm.log.XALog;
+import edu.illinois.htx.tm.log.CrossGroupLog;
 import edu.illinois.htx.tsm.NoSuchTimestampException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 
-public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
-    extends MVTOTransactionManager<K, R> implements XATransactionManager {
+public class MVTOCrossGroupTransactionManager<K extends Key, R extends LogRecord<K>>
+    extends MVTOGroupTransactionManager<K, R> implements
+    CrossGroupTransactionManager<K> {
 
-  public XAMVTOTransactionManager(KeyValueStore<K> keyValueStore,
-      XALog<K, R> log, SharedTimestampManager timestampManager) {
+  public MVTOCrossGroupTransactionManager(KeyValueStore<K> keyValueStore,
+      CrossGroupLog<K, R> log, SharedTimestampManager timestampManager) {
     super(keyValueStore, log, timestampManager);
   }
 
@@ -31,17 +32,17 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  public XALog<K, R> getTransactionLog() {
-    return (XALog<K, R>) transactionLog;
+  public CrossGroupLog<K, R> getTransactionLog() {
+    return (CrossGroupLog<K, R>) transactionLog;
   }
 
   @Override
-  public synchronized XID join(final TID tid) throws IOException {
+  public synchronized XID join(final TID tid, K groupKey) throws IOException {
     runLock.readLock().lock();
     try {
       checkRunning();
-      XAMVTOTransaction<K> ta = new XAMVTOTransaction<K>(this);
-      ta.join(tid);
+      MVTOCrossGroupTransaction<K> ta = new MVTOCrossGroupTransaction<K>(this);
+      ta.join(tid, groupKey);
       addTransaction(ta);
       return ta.getID();
     } finally {
@@ -52,10 +53,10 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
   @Override
   public void prepare(final XID xid) throws IOException {
     new WithReadLock() {
-      void execute(MVTOTransaction<K> ta) throws IOException {
-        if (!(ta instanceof XAMVTOTransaction))
+      void execute(MVTOGroupTransaction<K> ta) throws IOException {
+        if (!(ta instanceof MVTOCrossGroupTransaction))
           throw new IllegalStateException("Cannot prepare non XA transaction");
-        ((XAMVTOTransaction<K>) ta).prepare();
+        ((MVTOCrossGroupTransaction<K>) ta).prepare();
         System.out.println("Prepared " + xid);
       }
     }.run(xid);
@@ -66,8 +67,8 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
     if (onePhase) {
       new WithReadLock() {
         @Override
-        void execute(MVTOTransaction<K> ta) throws IOException {
-          XAMVTOTransaction<K> xta = (XAMVTOTransaction<K>) ta;
+        void execute(MVTOGroupTransaction<K> ta) throws IOException {
+          MVTOCrossGroupTransaction<K> xta = (MVTOCrossGroupTransaction<K>) ta;
           xta.setPrepared();
           xta.commit();
         }
@@ -83,20 +84,20 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  protected void replay(LogRecord record) {
+  protected void replay(LogRecord<K> record) {
     TID tid = record.getTID();
-    MVTOTransaction<K> ta = getTransaction(tid);
+    MVTOGroupTransaction<K> ta = getTransaction(tid);
     switch (record.getType()) {
     case RECORD_TYPE_STATE_TRANSITION:
-      StateTransitionLogRecord stlr = (StateTransitionLogRecord) record;
+      StateTransitionLogRecord<K> stlr = (StateTransitionLogRecord<K>) record;
       switch (stlr.getTransactionState()) {
       case PREPARED: {
         if (ta == null)
           return;
-        if (!(ta instanceof XAMVTOTransaction))
+        if (!(ta instanceof MVTOCrossGroupTransaction))
           throw new IllegalStateException(
               "prepare log record for non-XA transaction");
-        XAMVTOTransaction<K> xta = (XAMVTOTransaction<K>) ta;
+        MVTOCrossGroupTransaction<K> xta = (MVTOCrossGroupTransaction<K>) ta;
         xta.setPrepared();
         return;
       }
@@ -104,9 +105,9 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
         if (ta != null)
           throw new IllegalStateException(
               "join record for existing transaction");
-        XAMVTOTransaction<K> xta = new XAMVTOTransaction<K>(this);
+        MVTOCrossGroupTransaction<K> xta = new MVTOCrossGroupTransaction<K>(this);
         long sid = stlr.getSID();
-        xta.setJoined((XID) record.getTID(), sid);
+        xta.setJoined((XID) record.getTID(), sid, stlr.getGroupKey());
         addTransaction(ta);
         return;
       }
@@ -117,11 +118,11 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  protected void recover(MVTOTransaction<K> ta) {
+  protected void recover(MVTOGroupTransaction<K> ta) {
     try {
       switch (ta.getState()) {
       case JOINED: {
-        XAMVTOTransaction<K> xta = (XAMVTOTransaction<K>) ta;
+        MVTOCrossGroupTransaction<K> xta = (MVTOCrossGroupTransaction<K>) ta;
         XID xid = xta.getID();
         try {
           // TODO check if any operations failed in the middle
@@ -137,7 +138,7 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
         return;
       }
       case PREPARED: {
-        XAMVTOTransaction<K> xta = (XAMVTOTransaction<K>) ta;
+        MVTOCrossGroupTransaction<K> xta = (MVTOCrossGroupTransaction<K>) ta;
         XID xid = xta.getID();
         // first try to figure out if we need to commit
         try {
@@ -172,7 +173,7 @@ public class XAMVTOTransactionManager<K extends Key, R extends LogRecord>
   }
 
   @Override
-  protected void reclaim(MVTOTransaction<K> ta) {
+  protected void reclaim(MVTOGroupTransaction<K> ta) {
     switch (ta.getState()) {
     case JOINED:
     case PREPARED:

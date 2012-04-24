@@ -4,6 +4,6 @@ public interface RowGroupPolicy {
 
   public static final String META_ATTR = "ROW_GROUP_POLICY";
 
-  byte[] getGroupRow(byte[] row);
+  byte[] getGroupKey(byte[] row);
 
 }

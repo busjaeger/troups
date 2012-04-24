@@ -16,8 +16,8 @@ class HGetLogRecord extends HOperationLogRecord implements GetLogRecord<HKey> {
     super(Log.RECORD_TYPE_GET);
   }
 
-  public HGetLogRecord(long sid, TID tid, HKey key, long version) {
-    super(Log.RECORD_TYPE_GET, sid, tid, key);
+  public HGetLogRecord(long sid, TID tid, HKey groupKey, HKey key, long version) {
+    super(Log.RECORD_TYPE_GET, sid, tid, groupKey, key);
     this.version = version;
   }
 

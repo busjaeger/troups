@@ -2,11 +2,11 @@ package edu.illinois.htx.tm;
 
 import java.io.IOException;
 
-public interface TransactionManager {
+public interface GroupTransactionManager<K extends Key> {
 
   public static final long VERSION = 1L;
 
-  TID begin() throws IOException;
+  TID begin(K groupKey) throws IOException;
 
   void commit(TID tid) throws TransactionAbortedException, IOException;
 

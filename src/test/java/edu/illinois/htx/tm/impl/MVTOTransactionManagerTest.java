@@ -23,13 +23,13 @@ import edu.illinois.htx.test.StringKeyValueStore;
 import edu.illinois.htx.test.StringKeyVersions;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
-import edu.illinois.htx.tm.impl.MVTOTransactionManager;
+import edu.illinois.htx.tm.impl.MVTOGroupTransactionManager;
 import edu.illinois.htx.tsm.TimestampManager;
 import edu.illinois.htx.tsm.mem.InMemoryTimestampManager;
 
 public class MVTOTransactionManagerTest {
 
-  private MVTOTransactionManager<StringKey, StringKeyLogRecord> tm;
+  private MVTOGroupTransactionManager<StringKey, StringKeyLogRecord> tm;
   private StringKeyValueStore kvs;
   private StringKeyLog log;
   private TimestampManager tsm;
@@ -39,8 +39,8 @@ public class MVTOTransactionManagerTest {
     kvs = new StringKeyValueStore();
     log = new StringKeyLog();
     tsm = new InMemoryTimestampManager();
-    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log,
-        tsm);
+    tm = new MVTOGroupTransactionManager<StringKey, StringKeyLogRecord>(kvs,
+        log, tsm);
     kvs.addTransactionOperationObserver(tm);
     tm.starting();
   }
@@ -52,27 +52,28 @@ public class MVTOTransactionManagerTest {
   @Test
   public void testWriteConflict() throws IOException {
     // state in the data store
+    StringKey groupKey = new StringKey("1");
     StringKey key = new StringKey("x");
     long version = tsm.acquire();
     kvs.putVersion(key, version);
     tsm.release(version);
 
-    TID t1 = tm.begin();
-    TID t2 = tm.begin();
+    TID t1 = tm.begin(groupKey);
+    TID t2 = tm.begin(groupKey);
 
     // both transactions read the initial version
-    kvs.getVersions(t1, key);
-    kvs.getVersions(t2, key);
+    kvs.getVersions(t1, groupKey, key);
+    kvs.getVersions(t2, groupKey, key);
 
     try {
-      kvs.putVersion(t1, key);
+      kvs.putVersion(t1, groupKey, key);
       Assert.fail("transaction 1 should have failed write check");
     } catch (TransactionAbortedException e) {
       // expected
     }
 
     try {
-      kvs.putVersion(t2, key);
+      kvs.putVersion(t2, groupKey, key);
     } catch (TransactionAbortedException e) {
       e.printStackTrace();
       Assert.fail("tran 2 aborted unexpectedly");
@@ -92,16 +93,17 @@ public class MVTOTransactionManagerTest {
   @Test
   public void testReadConflict() throws IOException {
     // state in the data store
+    StringKey groupKey = new StringKey("1");
     StringKey key = new StringKey("x");
     long version = tsm.acquire();
     Iterable<StringKey> keys = Arrays.asList(key);
     kvs.putVersion(key, version);
 
-    TID t1 = tm.begin();
-    TID t2 = tm.begin();
+    TID t1 = tm.begin(groupKey);
+    TID t2 = tm.begin(groupKey);
 
-    Iterable<Long> versions = kvs.getVersions(t1, key);
-    tm.beforePut(t1, keys);
+    Iterable<Long> versions = kvs.getVersions(t1, groupKey, key);
+    tm.beforePut(t1, groupKey, keys);
 
     /*
      * transaction 2 executes a read AFTER we have admitted the write, but
@@ -110,13 +112,13 @@ public class MVTOTransactionManagerTest {
      * the schedule is no longer serializable.
      */
     try {
-      tm.afterGet(t2, singleton(key, versions));
+      tm.afterGet(t2, groupKey, singleton(key, versions));
       Assert.fail("read should not be permitted");
     } catch (TransactionAbortedException e) {
       // expected
     }
     kvs.putVersion(key, 1);
-    tm.afterPut(t1, keys);
+    tm.afterPut(t1, groupKey, keys);
     tm.commit(t1);
 
     // at this point we expect only version 2 of x to be present
@@ -137,18 +139,19 @@ public class MVTOTransactionManagerTest {
   public void testRestart() throws IOException, InterruptedException,
       ExecutionException {
     // state in the data store
+    StringKey groupKey = new StringKey("1");
     StringKey key = new StringKey("x");
     long version = tsm.acquire();
     kvs.putVersion(key, version);
 
-    final TID t1 = tm.begin();
-    final TID t2 = tm.begin();
+    final TID t1 = tm.begin(groupKey);
+    final TID t2 = tm.begin(groupKey);
 
-    kvs.getVersions(t1, key);
-    kvs.putVersion(t1, key);
+    kvs.getVersions(t1, groupKey, key);
+    kvs.putVersion(t1, groupKey, key);
 
-    kvs.getVersions(t2, key);
-    kvs.putVersion(t2, key);
+    kvs.getVersions(t2, groupKey, key);
+    kvs.putVersion(t2, groupKey, key);
 
     Callable<Void> commit2 = new Callable<Void>() {
       @Override
@@ -170,8 +173,8 @@ public class MVTOTransactionManagerTest {
       Assert.assertTrue(e.getCause() instanceof IOException);
     }
 
-    tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log,
-        tsm);
+    tm = new MVTOGroupTransactionManager<StringKey, StringKeyLogRecord>(kvs,
+        log, tsm);
     tm.starting();
     f = es.submit(commit2);
     tm.commit(t1);

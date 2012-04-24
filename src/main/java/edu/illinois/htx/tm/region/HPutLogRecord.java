@@ -9,8 +9,8 @@ public class HPutLogRecord extends HOperationLogRecord {
     super(Log.RECORD_TYPE_PUT);
   }
 
-  public HPutLogRecord(long sid, TID tid, HKey key) {
-    super(Log.RECORD_TYPE_PUT, sid, tid, key);
+  public HPutLogRecord(long sid, TID tid, HKey groupKey, HKey key) {
+    super(Log.RECORD_TYPE_PUT, sid, tid, groupKey, key);
   }
 
 }

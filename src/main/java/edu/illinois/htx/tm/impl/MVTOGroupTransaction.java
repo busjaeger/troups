@@ -1,9 +1,9 @@
 package edu.illinois.htx.tm.impl;
 
-import static edu.illinois.htx.tm.TransactionState.ABORTED;
-import static edu.illinois.htx.tm.TransactionState.COMMITTED;
-import static edu.illinois.htx.tm.TransactionState.FINALIZED;
-import static edu.illinois.htx.tm.TransactionState.STARTED;
+import static edu.illinois.htx.tm.GroupTransactionState.ABORTED;
+import static edu.illinois.htx.tm.GroupTransactionState.COMMITTED;
+import static edu.illinois.htx.tm.GroupTransactionState.FINALIZED;
+import static edu.illinois.htx.tm.GroupTransactionState.STARTED;
 import static edu.illinois.htx.tm.impl.TransientTransactionState.BLOCKED;
 import static edu.illinois.htx.tm.impl.TransientTransactionState.CREATED;
 
@@ -24,36 +24,38 @@ import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.log.Log;
 import edu.illinois.htx.tsm.TimestampManager;
 
-class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
+class MVTOGroupTransaction<K extends Key> implements
+    Comparable<MVTOGroupTransaction<K>> {
 
   // immutable state
-  protected final MVTOTransactionManager<K, ?> tm;
+  protected final MVTOGroupTransactionManager<K, ?> tm;
 
   // mutable state
   protected TID id;
+  protected K groupKey;
   protected long sid;
   protected int state;
   private final Map<K, Long> reads;
   private final Map<K, Boolean> writes;
-  private final Set<MVTOTransaction<K>> readFrom;
-  private final Set<MVTOTransaction<K>> readBy;
+  private final Set<MVTOGroupTransaction<K>> readFrom;
+  private final Set<MVTOGroupTransaction<K>> readBy;
 
-  public MVTOTransaction(MVTOTransactionManager<K, ?> tm) {
+  public MVTOGroupTransaction(MVTOGroupTransactionManager<K, ?> tm) {
     this.state = CREATED;
     this.tm = tm;
     this.reads = new HashMap<K, Long>();
     this.writes = new HashMap<K, Boolean>();
-    this.readFrom = new HashSet<MVTOTransaction<K>>(0);
-    this.readBy = new HashSet<MVTOTransaction<K>>(0);
+    this.readFrom = new HashSet<MVTOGroupTransaction<K>>(0);
+    this.readBy = new HashSet<MVTOGroupTransaction<K>>(0);
   }
 
-  public final synchronized void begin() throws IOException {
+  public final synchronized void begin(K groupKey) throws IOException {
     if (!shouldBegin())
       return;
     long ts = getTimestampManager().acquire();
     TID id = new TID(ts);
-    long sid = getTransactionLog().appendStateTransition(id, STARTED);
-    setStarted(id, sid);
+    long sid = getTransactionLog().appendStateTransition(id, groupKey, STARTED);
+    setStarted(id, sid, groupKey);
   }
 
   protected boolean shouldBegin() {
@@ -66,9 +68,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   // in-memory state transition
-  protected void setStarted(TID id, long sid) {
+  protected void setStarted(TID id, long sid, K groupKey) {
     this.id = id;
     this.sid = sid;
+    this.groupKey = groupKey;
     this.state = STARTED;
   }
 
@@ -77,7 +80,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     if (!shouldCommit())
       return;
     waitForReadFrom();
-    getTransactionLog().appendStateTransition(id, COMMITTED);
+    getTransactionLog().appendStateTransition(id, groupKey, COMMITTED);
     setCommitted();
     finalizeCommit();
   }
@@ -101,7 +104,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   public final synchronized void abort() throws IOException {
     if (!shouldAbort())
       return;
-    getTransactionLog().appendStateTransition(id, ABORTED);
+    getTransactionLog().appendStateTransition(id, groupKey, ABORTED);
     if (state == BLOCKED)
       notify();
     setAborted();
@@ -176,7 +179,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
     // logging once is sufficient, since delete operation idempotent
     releaseTimestamp();
-    getTransactionLog().appendStateTransition(id, FINALIZED);
+    getTransactionLog().appendStateTransition(id, groupKey, FINALIZED);
     setCommitFinalized();
   }
 
@@ -188,8 +191,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   protected void finalizeAbort() throws IOException {
     // cascade abort to transactions that read from this one
-    for (Iterator<MVTOTransaction<K>> it = readBy.iterator(); it.hasNext();) {
-      MVTOTransaction<K> readBy = it.next();
+    for (Iterator<MVTOGroupTransaction<K>> it = readBy.iterator(); it.hasNext();) {
+      MVTOGroupTransaction<K> readBy = it.next();
       readBy.abort();
       it.remove();
     }
@@ -208,7 +211,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
 
     releaseTimestamp();
-    getTransactionLog().appendStateTransition(id, FINALIZED);
+    getTransactionLog().appendStateTransition(id, groupKey, FINALIZED);
     setAbortFinalized();
   }
 
@@ -221,7 +224,8 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     getTimestampManager().release(id.getTS());
   }
 
-  public final synchronized void beforeGet(Iterable<? extends K> keys) {
+  public final synchronized void beforeGet(final K groupKey,
+      Iterable<? extends K> keys) {
     checkActive();
     tm.addActiveReader(this);
   }
@@ -237,9 +241,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
    *          versions and all for the same row.
    * @throws TransactionAbortedException
    */
-  public final synchronized void afterGet(Iterable<? extends KeyVersions<K>> kvs)
-      throws IOException {
+  public final synchronized void afterGet(final K groupKey,
+      Iterable<? extends KeyVersions<K>> kvs) throws IOException {
     checkActive();
+    checkGroupKey(groupKey);
     tm.removeActiveReader(this);
     for (KeyVersions<K> kv : kvs) {
       K key = kv.getKey();
@@ -251,7 +256,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           /*
            * 1. filter out aborted and deleted versions
            */
-          MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
+          MVTOGroupTransaction<K> writer = tm.getTransaction(new TID(version));
           // if we don't have the writer, assume it is has been GC'ed
           if (writer != null) {
             synchronized (writer) {
@@ -278,9 +283,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
            * transaction had already read the older value, the writer would have
            * never been admitted)
            */
-          NavigableSet<MVTOTransaction<K>> writes = tm.getActiveWriters(key);
+          NavigableSet<MVTOGroupTransaction<K>> writes = tm
+              .getActiveWriters(key);
           if (writes != null) {
-            MVTOTransaction<K> lastWrite = writes.lower(this);
+            MVTOGroupTransaction<K> lastWrite = writes.lower(this);
             if (lastWrite != null
                 && tm.getTimestampManager().compare(lastWrite.id.getTS(),
                     version) > 0) {
@@ -290,7 +296,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
           }
 
           // 3. remember read for conflict detection
-          getTransactionLog().appendGet(id, key, version);
+          getTransactionLog().appendGet(id, groupKey, key, version);
           addGet(key, version);
 
           // 4. remove all older versions from result set
@@ -307,7 +313,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   // in-memory state transition
   protected void addGet(K key, long version) {
-    MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
+    MVTOGroupTransaction<K> writer = tm.getTransaction(new TID(version));
     // if value is not yet committed, add a dependency in case writer aborts
     if (writer != null && writer.isActive()) {
       writer.readBy.add(this);
@@ -317,59 +323,60 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     tm.addReader(key, version, this);
   }
 
-  public final synchronized void failedGet(Iterable<? extends K> keys,
-      Throwable t) {
+  public final synchronized void failedGet(final K groupKey,
+      Iterable<? extends K> keys, Throwable t) {
     checkActive();
+    checkGroupKey(groupKey);
     tm.removeActiveReader(this);
   }
 
-  public final synchronized void beforePut(Iterable<? extends K> keys)
-      throws IOException {
-    beforeMutation(false, keys);
+  public final synchronized void beforePut(final K groupKey,
+      Iterable<? extends K> keys) throws IOException {
+    beforeMutation(false, groupKey, keys);
   }
 
-  public final synchronized void afterPut(Iterable<? extends K> keys)
-      throws IOException {
-    afterMutation(false, keys);
+  public final synchronized void afterPut(final K groupKey,
+      Iterable<? extends K> keys) throws IOException {
+    afterMutation(false, groupKey, keys);
   }
 
-  public final synchronized void failedPut(Iterable<? extends K> keys,
-      Throwable t) throws IOException {
-    afterMutation(false, keys);
+  public final synchronized void failedPut(final K groupKey,
+      Iterable<? extends K> keys, Throwable t) throws IOException {
+    afterMutation(false, groupKey, keys);
   }
 
-  public final synchronized void beforeDelete(Iterable<? extends K> keys)
-      throws IOException {
-    beforeMutation(true, keys);
+  public final synchronized void beforeDelete(final K groupKey,
+      Iterable<? extends K> keys) throws IOException {
+    beforeMutation(true, groupKey, keys);
   }
 
-  public final synchronized void afterDelete(Iterable<? extends K> keys)
-      throws IOException {
-    afterMutation(true, keys);
+  public final synchronized void afterDelete(final K groupKey,
+      Iterable<? extends K> keys) throws IOException {
+    afterMutation(true, groupKey, keys);
   }
 
-  public final synchronized void failedDelete(Iterable<? extends K> keys,
-      Throwable t) throws IOException {
-    failedMutation(true, keys);
+  public final synchronized void failedDelete(final K groupKey,
+      Iterable<? extends K> keys, Throwable t) throws IOException {
+    failedMutation(true, groupKey, keys);
   }
 
-  private void beforeMutation(boolean isDelete, Iterable<? extends K> keys)
-      throws IOException {
+  private void beforeMutation(boolean isDelete, final K groupKey,
+      Iterable<? extends K> keys) throws IOException {
     checkActive();
-
+    checkGroupKey(groupKey);
     for (K key : keys) {
       tm.lock(key);
       try {
         // enforce proper time-stamp ordering: abort transaction if needed
-        NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = tm
+        NavigableMap<Long, NavigableSet<MVTOGroupTransaction<K>>> versions = tm
             .getReaders(key);
         if (versions != null) {
           // reduce to versions that were written before this TA started
-          for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
-              id.getTS(), false).values()) {
+          for (NavigableSet<MVTOGroupTransaction<K>> readers : versions
+              .headMap(id.getTS(), false).values()) {
             // check if any version has been read by a TA that started after
             // this TA
-            MVTOTransaction<K> reader = readers.higher(this);
+            MVTOGroupTransaction<K> reader = readers.higher(this);
             if (reader != null) {
               abort();
               throw new TransactionAbortedException("Transaction " + id
@@ -385,9 +392,9 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
          * when the transaction commits
          */
         if (isDelete)
-          getTransactionLog().appendDelete(id, key);
+          getTransactionLog().appendDelete(id, groupKey, key);
         else
-          getTransactionLog().appendPut(id, key);
+          getTransactionLog().appendPut(id, groupKey, key);
         /*
          * Add write in progress, so readers can check if they see the version
          */
@@ -404,8 +411,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     writes.put(key, isDelete);
   }
 
-  private void afterMutation(boolean isDelete, Iterable<? extends K> keys) {
+  private void afterMutation(boolean isDelete, final K groupKey,
+      Iterable<? extends K> keys) {
     checkActive();
+    checkGroupKey(groupKey);
     for (K key : keys) {
       tm.lock(key);
       try {
@@ -416,9 +425,9 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
-  private void failedMutation(boolean isDelete, Iterable<? extends K> keys) {
-    checkActive();
-    afterMutation(isDelete, keys);
+  private void failedMutation(boolean isDelete, final K groupKey,
+      Iterable<? extends K> keys) {
+    afterMutation(isDelete, groupKey, keys);
   }
 
   // ----------------------------------------------------------------------
@@ -490,7 +499,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   synchronized void notifyReadBy() {
-    for (MVTOTransaction<K> ta : readBy)
+    for (MVTOGroupTransaction<K> ta : readBy)
       if (readFrom.remove(ta) && readFrom.isEmpty())
         notify();
   }
@@ -514,6 +523,11 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
   }
 
+  private void checkGroupKey(K groupKey) {
+    if (!this.groupKey.equals(groupKey))
+      throw new IllegalArgumentException("Group Transaction cannot span groups");
+  }
+
   private boolean hasDeleted(K key) {
     return Boolean.TRUE == writes.get(key);
   }
@@ -523,7 +537,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   }
 
   @Override
-  public int compareTo(MVTOTransaction<K> ta) {
+  public int compareTo(MVTOGroupTransaction<K> ta) {
     if (id == null)
       throw new IllegalStateException("no id");
     if (ta.id == null)
@@ -536,9 +550,9 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   public boolean equals(Object obj) {
     if (id == null)
       throw new IllegalStateException("no id");
-    if (!(obj instanceof MVTOTransaction))
+    if (!(obj instanceof MVTOGroupTransaction))
       return false;
-    MVTOTransaction<K> ota = (MVTOTransaction<K>) obj;
+    MVTOGroupTransaction<K> ota = (MVTOGroupTransaction<K>) obj;
     if (ota.id == null)
       throw new IllegalArgumentException("no ta id");
     return id.equals(ota.id);

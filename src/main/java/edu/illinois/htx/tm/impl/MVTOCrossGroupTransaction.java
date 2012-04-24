@@ -1,13 +1,13 @@
 package edu.illinois.htx.tm.impl;
 
-import static edu.illinois.htx.tm.TransactionState.ABORTED;
-import static edu.illinois.htx.tm.TransactionState.COMMITTED;
-import static edu.illinois.htx.tm.TransactionState.FINALIZED;
-import static edu.illinois.htx.tm.TransactionState.STARTED;
+import static edu.illinois.htx.tm.GroupTransactionState.ABORTED;
+import static edu.illinois.htx.tm.GroupTransactionState.COMMITTED;
+import static edu.illinois.htx.tm.GroupTransactionState.FINALIZED;
+import static edu.illinois.htx.tm.GroupTransactionState.STARTED;
 import static edu.illinois.htx.tm.impl.TransientTransactionState.BLOCKED;
 import static edu.illinois.htx.tm.impl.TransientTransactionState.CREATED;
-import static edu.illinois.htx.tm.XATransactionState.JOINED;
-import static edu.illinois.htx.tm.XATransactionState.PREPARED;
+import static edu.illinois.htx.tm.CrossGroupTransactionState.JOINED;
+import static edu.illinois.htx.tm.CrossGroupTransactionState.PREPARED;
 
 import java.io.IOException;
 
@@ -15,15 +15,15 @@ import edu.illinois.htx.tm.Key;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.XID;
-import edu.illinois.htx.tm.log.XALog;
+import edu.illinois.htx.tm.log.CrossGroupLog;
 import edu.illinois.htx.tsm.NoSuchTimestampException;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
-public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
+public class MVTOCrossGroupTransaction<K extends Key> extends MVTOGroupTransaction<K>
     implements TimestampListener {
 
-  public XAMVTOTransaction(XAMVTOTransactionManager<K, ?> tm) {
+  public MVTOCrossGroupTransaction(MVTOCrossGroupTransactionManager<K, ?> tm) {
     super(tm);
   }
 
@@ -42,14 +42,15 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     return super.isActive();
   }
 
-  public synchronized void join(TID id) throws IOException {
+  public synchronized void join(TID id, K groupKey) throws IOException {
     checkJoin();
     long ts = id.getTS();
     long pid = getTimestampManager().acquireReference(ts);
     XID xid = new XID(ts, pid);
     getTimestampManager().addTimestampListener(ts, this);
-    long sid = getTransactionLog().appendXAStateTransition(xid, JOINED);
-    setJoined(xid, sid);
+    long sid = getTransactionLog().appendCrossGroupStateTransition(xid,
+        groupKey, JOINED);
+    setJoined(xid, sid, groupKey);
   }
 
   protected void checkJoin() {
@@ -61,9 +62,10 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     }
   }
 
-  protected void setJoined(XID id, long sid) {
+  protected void setJoined(XID id, long sid, K groupKey) {
     this.id = id;
     this.sid = sid;
+    this.groupKey = groupKey;
     this.state = JOINED;
   }
 
@@ -72,7 +74,8 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
     if (!shouldPrepare())
       return;
     waitForReadFrom();
-    getTransactionLog().appendXAStateTransition(getID(), PREPARED);
+    getTransactionLog().appendCrossGroupStateTransition(getID(), groupKey,
+        PREPARED);
     setPrepared();
   }
 
@@ -152,12 +155,12 @@ public class XAMVTOTransaction<K extends Key> extends MVTOTransaction<K>
 
   @Override
   protected SharedTimestampManager getTimestampManager() {
-    return ((XAMVTOTransactionManager<K, ?>) tm).getTimestampManager();
+    return ((MVTOCrossGroupTransactionManager<K, ?>) tm).getTimestampManager();
   }
 
   @Override
-  protected XALog<K, ?> getTransactionLog() {
-    return (XALog<K, ?>) tm.getTransactionLog();
+  protected CrossGroupLog<K, ?> getTransactionLog() {
+    return (CrossGroupLog<K, ?>) tm.getTransactionLog();
   }
 
   synchronized XID getID() {

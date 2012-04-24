@@ -11,18 +11,19 @@ import edu.illinois.htx.client.tm.RowGroupPolicy;
 import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
+import edu.illinois.htx.tm.region.HKey;
 import edu.illinois.htx.tm.region.RTM;
 
-public class LocalTransaction extends AbstractTransaction implements
+public class GroupTransaction extends AbstractTransaction implements
     Transaction {
 
-  private HTable table;
-  private RowGroupPolicy strategy;
-  private byte[] row;
   private TID id;
+  private RowGroupPolicy groupPolicy;
+  private HTable table;
+  private byte[] row;
   private boolean completed = false;
 
-  LocalTransaction() {
+  GroupTransaction() {
     super();
   }
 
@@ -33,11 +34,15 @@ public class LocalTransaction extends AbstractTransaction implements
 
     // if this is the first enlist -> begin transaction
     if (this.table == null) {
+      RowGroupPolicy groupPolicy = RowGroupSplitPolicy
+          .getRowGroupStrategy(table);
+      if (groupPolicy != null)
+        row = groupPolicy.getGroupKey(row);
       RTM rtm = table.coprocessorProxy(RTM.class, row);
-      this.id = rtm.begin();
+      this.id = rtm.begin(new HKey(row));
       this.table = table;
-      this.strategy = RowGroupSplitPolicy.getRowGroupStrategy(table);
-      this.row = strategy == null ? row : strategy.getGroupRow(row);
+      this.row = row;
+      this.groupPolicy = groupPolicy;
     }
     // otherwise ensure this transaction remains local
     else {
@@ -46,8 +51,8 @@ public class LocalTransaction extends AbstractTransaction implements
         throw new IllegalArgumentException(
             "Local transaction cannot span tables");
       // check same row group
-      if (strategy != null)
-        row = strategy.getGroupRow(row);
+      if (groupPolicy != null)
+        row = groupPolicy.getGroupKey(row);
       if (!Bytes.equals(this.row, row))
         throw new IllegalArgumentException(
             "Local transaction cannot span row groups");

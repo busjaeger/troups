@@ -26,7 +26,7 @@ public interface KeyValueStore<K extends Key> {
    */
   void deleteVersions(K key, long version) throws IOException;
 
-  void addTransactionOperationObserver(TransactionOperationObserver<K> observer);
+  void addTransactionOperationObserver(GroupTransactionOperationObserver<K> observer);
 
   void addLifecycleListener(LifecycleListener listener);
 

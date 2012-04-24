@@ -13,9 +13,11 @@ import edu.illinois.htx.tm.TransactionAbortedException;
  */
 public interface Transaction {
 
+  Put createPut(HTable table, byte[] row) throws IOException;
+
   Get createGet(HTable table, byte[] row) throws IOException;
 
-  Put createPut(HTable table, byte[] row) throws IOException;
+  Put createDelete(HTable table, byte[] row) throws IOException;
 
   void rollback();
 

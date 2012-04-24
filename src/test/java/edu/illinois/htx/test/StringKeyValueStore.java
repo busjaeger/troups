@@ -14,7 +14,7 @@ import java.util.TreeMap;
 import edu.illinois.htx.tm.KeyValueStore;
 import edu.illinois.htx.tm.LifecycleListener;
 import edu.illinois.htx.tm.TID;
-import edu.illinois.htx.tm.TransactionOperationObserver;
+import edu.illinois.htx.tm.GroupTransactionOperationObserver;
 import edu.illinois.htx.tm.TransactionAbortedException;
 
 /**
@@ -29,35 +29,35 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
     }
   };
 
-  private final List<TransactionOperationObserver<StringKey>> observers;
+  private final List<GroupTransactionOperationObserver<StringKey>> observers;
   private final NavigableMap<StringKey, NavigableMap<Long, Object>> values;
 
   public StringKeyValueStore() {
     this.values = new TreeMap<StringKey, NavigableMap<Long, Object>>();
-    this.observers = new ArrayList<TransactionOperationObserver<StringKey>>();
+    this.observers = new ArrayList<GroupTransactionOperationObserver<StringKey>>();
   }
 
-  public void putVersion(TID tid, StringKey key)
+  public void putVersion(TID tid, StringKey groupKey, StringKey key)
       throws TransactionAbortedException, IOException {
     Iterable<StringKey> keys = Arrays.asList(key);
-    for (TransactionOperationObserver<StringKey> observer : observers)
-      observer.beforePut(tid, keys);
+    for (GroupTransactionOperationObserver<StringKey> observer : observers)
+      observer.beforePut(tid, groupKey, keys);
     putVersion(key, tid.getTS());
-    for (TransactionOperationObserver<StringKey> observer : observers)
-      observer.afterPut(tid, keys);
+    for (GroupTransactionOperationObserver<StringKey> observer : observers)
+      observer.afterPut(tid, groupKey, keys);
   }
 
-  public Iterable<Long> getVersions(TID tid, final StringKey key)
+  public Iterable<Long> getVersions(TID tid, StringKey groupKey, final StringKey key)
       throws TransactionAbortedException, IOException {
-    for (TransactionOperationObserver<StringKey> observer : observers) {
+    for (GroupTransactionOperationObserver<StringKey> observer : observers) {
       Iterable<StringKey> keys = Arrays.asList(key);
-      observer.beforeGet(tid, keys);
+      observer.beforeGet(tid, groupKey, keys);
     }
     Iterable<Long> versions = getVersions(key, tid.getTS());
-    for (TransactionOperationObserver<StringKey> observer : observers) {
+    for (GroupTransactionOperationObserver<StringKey> observer : observers) {
       Iterable<StringKeyVersions> kvs = asList(new StringKeyVersions(key,
           versions));
-      observer.afterGet(tid, kvs);
+      observer.afterGet(tid, groupKey, kvs);
     }
     return versions;
   }
@@ -102,7 +102,7 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
 
   @Override
   public void addTransactionOperationObserver(
-      TransactionOperationObserver<StringKey> observer) {
+      GroupTransactionOperationObserver<StringKey> observer) {
     observers.add(observer);
   }
 

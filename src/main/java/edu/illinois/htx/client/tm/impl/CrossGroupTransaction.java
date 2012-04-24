@@ -24,11 +24,12 @@ import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.TransactionAbortedException;
 import edu.illinois.htx.tm.XID;
+import edu.illinois.htx.tm.region.HKey;
 import edu.illinois.htx.tm.region.RTM;
 import edu.illinois.htx.tsm.SharedTimestampManager;
 import edu.illinois.htx.tsm.TimestampManager.TimestampListener;
 
-class XGTransaction extends AbstractTransaction implements Transaction,
+class CrossGroupTransaction extends AbstractTransaction implements Transaction,
     TimestampListener {
 
   private static enum State {
@@ -45,7 +46,7 @@ class XGTransaction extends AbstractTransaction implements Transaction,
   private final Map<String, RowGroupPolicy> strategies = new HashMap<String, RowGroupPolicy>();
   private State state;
 
-  XGTransaction(SharedTimestampManager tsm, ExecutorService pool) {
+  CrossGroupTransaction(SharedTimestampManager tsm, ExecutorService pool) {
     this.stsm = tsm;
     this.pool = pool;
     this.state = State.CREATED;
@@ -81,13 +82,13 @@ class XGTransaction extends AbstractTransaction implements Transaction,
     // determine row group
     RowGroupPolicy strategy = getStrategy(table);
     if (strategy != null)
-      row = strategy.getGroupRow(row);
+      row = strategy.getGroupKey(row);
     RowGroup group = new RowGroup(table, row);
 
     // this is a new row group -> enlist RTM in transaction
     XID xid = groups.get(group);
     if (xid == null) {
-      xid = getRTM(group).join(id);
+      xid = getRTM(group).join(id, new HKey(row));
       groups.put(group, xid);
       if (!stsm.addReferenceListener(xid.getTS(), xid.getPid(), this)) {
         rollback();

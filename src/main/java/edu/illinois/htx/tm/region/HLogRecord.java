@@ -9,10 +9,13 @@ import org.apache.hadoop.io.Writable;
 import edu.illinois.htx.tm.TID;
 import edu.illinois.htx.tm.log.LogRecord;
 
-public abstract class HLogRecord implements LogRecord, Writable,
+public abstract class HLogRecord implements LogRecord<HKey>, Writable,
     Comparable<HLogRecord> {
 
+  // transient as in these won't be written into the DB log record
   private transient final int type;
+  private transient HKey groupKey;
+
   private long sid;
   private TID tid;
 
@@ -20,10 +23,11 @@ public abstract class HLogRecord implements LogRecord, Writable,
     this.type = type;
   }
 
-  HLogRecord(int type, long sid, TID tid) {
+  HLogRecord(int type, long sid, TID tid, HKey groupKey) {
     this(type);
     this.sid = sid;
     this.tid = tid;
+    this.groupKey = groupKey;
   }
 
   @Override
@@ -39,6 +43,15 @@ public abstract class HLogRecord implements LogRecord, Writable,
   @Override
   public int getType() {
     return type;
+  }
+
+  @Override
+  public HKey getGroupKey() {
+    return groupKey;
+  }
+
+  void setGroupKey(HKey groupKey) {
+    this.groupKey = groupKey;
   }
 
   @Override

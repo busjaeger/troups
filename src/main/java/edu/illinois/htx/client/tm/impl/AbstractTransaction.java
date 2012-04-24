@@ -6,12 +6,21 @@ import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.WritableUtils;
 
+import edu.illinois.htx.Constants;
 import edu.illinois.htx.client.tm.Transaction;
 import edu.illinois.htx.tm.TID;
 
 public abstract class AbstractTransaction implements Transaction {
+
+  @Override
+  public Put createDelete(HTable table, byte[] row) throws IOException {
+    Put put = createPut(table, row);
+    put.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
+    return put;
+  }
 
   @Override
   public Get createGet(HTable table, byte[] row) throws IOException {
@@ -38,5 +47,5 @@ public abstract class AbstractTransaction implements Transaction {
   protected abstract TID getTID(HTable table, byte[] row) throws IOException;
 
   protected abstract String getTIDAttr();
-  
+
 }

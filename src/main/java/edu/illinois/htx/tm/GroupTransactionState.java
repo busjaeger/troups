@@ -1,6 +1,6 @@
 package edu.illinois.htx.tm;
 
-public interface TransactionState {
+public interface GroupTransactionState {
 
   public static final int STARTED = 1;
   public static final int COMMITTED = 2;

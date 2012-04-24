@@ -16,8 +16,8 @@ public abstract class HOperationLogRecord extends HLogRecord implements
     super(type);
   }
 
-  public HOperationLogRecord(int type, long sid, TID tid, HKey key) {
-    super(type, sid, tid);
+  public HOperationLogRecord(int type, long sid, TID tid, HKey groupKey, HKey key) {
+    super(type, sid, tid, groupKey);
     this.key = key;
   }
 
