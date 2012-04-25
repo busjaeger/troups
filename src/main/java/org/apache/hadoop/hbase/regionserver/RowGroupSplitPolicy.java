@@ -8,7 +8,7 @@ import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.util.ReflectionUtils;
 
-import edu.illinois.htx.client.tm.RowGroupPolicy;
+import edu.illinois.troup.client.tm.RowGroupPolicy;
 
 public class RowGroupSplitPolicy extends ConstantSizeRegionSplitPolicy {
 

@@ -1,0 +1,8 @@
+This package duplicates some of the HBase APIs to make it easier to work with the transaction APIs.
+They are merely a utility, i.e., they are not required for using the transaction manager.
+The main reasons they exist are the following:
+<ol>
+<li>Explicitly remove the timestamp from the APIs --> troup uses timestamps to implement MVCC
+<li>Convert Deletes into Put + delete flag --> troup handles deletion of versions when they are no longer needed 
+<li>Restrict the APIs to the ones we have tested
+</ol>
