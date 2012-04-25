@@ -1,22 +1,22 @@
 How to install:
 
-TROUP_HOME: directory that contains troup source code (contains pom.xml)
+TROUPS_HOME: directory that contains troups source code (contains pom.xml)
 HBASE_HOME: directory that contains HBase binaries
 
 0. Prereq: install and configure HBase 0.92 in pseudo distributed mode
 
-1. build troup jar
-  cd ${TROUP_HOME}
+1. build troups jar
+  cd ${TROUPS_HOME}
   mvn install
 
 2. copy jar to HBase installation
-  cp target/troup-0.0.1-SNAPSHOT.jar ${HBASE_HOME}/lib/
+  cp target/troups-0.0.1-SNAPSHOT.jar ${HBASE_HOME}/lib/
 
-3. build troup test jar
+3. build troups test jar
   mvn jar:test-jar
 
 4. copy test jar to HBase installation
-  cp target/troup-0.0.1-SNAPSHOT-tests.jar ${HBASE_HOME}/lib/
+  cp target/troups-0.0.1-SNAPSHOT-tests.jar ${HBASE_HOME}/lib/
 
 5. start HDFS
   cd ${HADOOP_HOME}
@@ -27,5 +27,5 @@ HBASE_HOME: directory that contains HBase binaries
   bin/start-hbase.sh
 
 7. run test case
-  bin/hbase edu.illinois.troup.client.SingleTableTest
+  bin/hbase edu.illinois.troups.client.SingleTableTest
   (last printed line should be: 'succeeded')
