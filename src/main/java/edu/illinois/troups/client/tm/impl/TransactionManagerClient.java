@@ -39,7 +39,7 @@ public class TransactionManagerClient extends TransactionManager {
   }
 
   @Override
-  public Transaction beginXG() {
+  public Transaction beginCrossGroup() {
     CrossGroupTransaction tran = new CrossGroupTransaction(stsm, pool);
     try {
       tran.begin();

@@ -23,7 +23,7 @@ public class HTable implements Closeable {
 
   public Result get(Transaction ta, Get get) throws IOException {
     org.apache.hadoop.hbase.client.Get hGet = ta
-        .createGet(hTable, get.getRow());
+        .enlistGet(hTable, get.getRow());
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
         .entrySet())
       for (byte[] column : entry.getValue())
@@ -35,7 +35,7 @@ public class HTable implements Closeable {
 
   public void put(Transaction ta, Put put) throws IOException {
     org.apache.hadoop.hbase.client.Put hPut = ta
-        .createPut(hTable, put.getRow());
+        .enlistPut(hTable, put.getRow());
     for (List<KeyValue> kvl : put.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), kv.getValue());
@@ -50,7 +50,7 @@ public class HTable implements Closeable {
    * marker that is interpreted by our Coprocessor.
    */
   public void delete(Transaction ta, Delete delete) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = ta.createDelete(hTable,
+    org.apache.hadoop.hbase.client.Put hPut = ta.enlistDelete(hTable,
         delete.getRow());
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)

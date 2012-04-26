@@ -16,14 +16,14 @@ import edu.illinois.troups.tm.TID;
 public abstract class AbstractTransaction implements Transaction {
 
   @Override
-  public Put createDelete(HTable table, byte[] row) throws IOException {
-    Put put = createPut(table, row);
+  public Put enlistDelete(HTable table, byte[] row) throws IOException {
+    Put put = enlistPut(table, row);
     put.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     return put;
   }
 
   @Override
-  public Get createGet(HTable table, byte[] row) throws IOException {
+  public Get enlistGet(HTable table, byte[] row) throws IOException {
     TID tid = getTID(table, row);
     Get get = new Get(row);
     get.setTimeRange(0L, tid.getTS());
@@ -32,7 +32,7 @@ public abstract class AbstractTransaction implements Transaction {
   }
 
   @Override
-  public Put createPut(HTable table, byte[] row) throws IOException {
+  public Put enlistPut(HTable table, byte[] row) throws IOException {
     TID tid = getTID(table, row);
     Put put = new Put(row, tid.getTS());
     setTID(put, tid);

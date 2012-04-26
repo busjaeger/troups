@@ -17,7 +17,7 @@ public abstract class TransactionManager implements Closeable {
 
   public abstract Transaction begin();
 
-  public abstract Transaction beginXG();
+  public abstract Transaction beginCrossGroup();
 
   public abstract void rollback(Transaction ta);
 

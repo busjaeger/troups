@@ -83,7 +83,7 @@ public class SingleTableTest {
       // could retry here
     }
 
-    ta = tm.beginXG();
+    ta = tm.beginCrossGroup();
     try {
       // Put put = new Put(row1).add(familyName, qualifierName, toBytes(400L));
       // table.put(ta, put);
@@ -99,7 +99,7 @@ public class SingleTableTest {
       // could retry here
     }
 
-    ta = tm.beginXG();
+    ta = tm.beginCrossGroup();
     try {
       // read balance of first account
       Get get1 = new Get(row1).addColumn(familyName, qualifierName);
