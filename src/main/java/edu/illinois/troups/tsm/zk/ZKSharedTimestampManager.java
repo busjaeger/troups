@@ -176,7 +176,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
     }
   }
 
-  @Override
+  // @Override
   public boolean addReferenceListener(long ts, long rid,
       TimestampListener listener) throws IOException {
     String refNode = Util.join(timestampsNode, ts, rid);
@@ -244,7 +244,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
     return removed;
   }
 
-  @Override
+  // @Override
   public boolean isReferenceHeldByMe(long ts, long rid)
       throws NoSuchTimestampException, IOException {
     String tsNode = join(timestampsNode, ts);

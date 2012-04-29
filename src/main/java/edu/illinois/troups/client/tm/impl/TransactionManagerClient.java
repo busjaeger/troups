@@ -1,7 +1,7 @@
 package edu.illinois.troups.client.tm.impl;
 
-import static edu.illinois.troups.Constants.DEFAULT_TM_CLIENT_THREAD_COUNT;
-import static edu.illinois.troups.Constants.TM_CLIENT_THREAD_COUNT;
+import static edu.illinois.troups.Constants.DEFAULT_CLIENT_THREAD_COUNT;
+import static edu.illinois.troups.Constants.CLIENT_THREAD_COUNT;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -28,8 +28,8 @@ public class TransactionManagerClient extends TransactionManager {
     @SuppressWarnings("deprecation")
     ZooKeeperWatcher zkw = connection.getZooKeeperWatcher();
     this.stsm = new ZKSharedTimestampManager(zkw);
-    int numThreads = conf.getInt(TM_CLIENT_THREAD_COUNT,
-        DEFAULT_TM_CLIENT_THREAD_COUNT);
+    int numThreads = conf.getInt(CLIENT_THREAD_COUNT,
+        DEFAULT_CLIENT_THREAD_COUNT);
     this.pool = Executors.newFixedThreadPool(numThreads);
   }
 

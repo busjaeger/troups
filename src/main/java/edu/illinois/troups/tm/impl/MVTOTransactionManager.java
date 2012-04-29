@@ -146,10 +146,15 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   protected final Set<MVTOTransaction<K>> reclaimables;
   // lock protect the previous two conflict detection data structures
   protected final ConcurrentMap<Key, Lock> keyLocks;
+  protected boolean closing;
   // flag to indicate whether this TM is running
   protected boolean running;
   // guards the running flag
   protected ReadWriteLock runLock = new ReentrantReadWriteLock();
+  // last locally reclaimed transaction
+  protected long reclaimed;
+  //
+  protected ReadWriteLock reclaimLock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
       TransactionLog<K, R> transactionLog, TimestampManager tsm) {
@@ -184,20 +189,39 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   }
 
   public void start() {
+    runLock.readLock().lock();
+    try {
+      if (running)
+        return;
+    } finally {
+      runLock.readLock().unlock();
+    }
     runLock.writeLock().lock();
     try {
       if (running)
         return;
+      // first replay log records
       NavigableMap<Long, R> records = transactionLog.open();
       for (Entry<Long, R> record : records.entrySet()) {
         long sid = record.getKey();
         R r = record.getValue();
         replay(sid, r);
       }
+
+      // next recover any transactions
       for (MVTOTransaction<K> ta : transactions.values())
         recover(ta);
+
+      // finally run round of reclamation to remove obsolete transactions
+      long ts = timestampManager.getLastReclaimedTimestamp();
+      if (transactions.isEmpty())
+        this.reclaimed = ts;
+      else
+        reclaimed(ts);
+
       this.timestampManager.addTimestampReclamationListener(this);
       running = true;
+      closing = false;
     } catch (IOException e) {
       throw new IllegalStateException(e);
     } finally {
@@ -213,8 +237,14 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     tTime += time;
   }
 
-  // TODO
   public void stop() {
+    runLock.readLock().lock();
+    try {
+      if (closing || !running)
+        return;
+    } finally {
+      runLock.readLock().lock();
+    }
     if (!runLock.writeLock().tryLock()) {
       while (true) {
         for (MVTOTransaction<K> ta : transactions.values())
@@ -228,34 +258,45 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       }
     }
     try {
-      if (!running)
+      if (closing || !running)
         return;
-      running = false;
+      closing = true;
       LOG.info("Timestamp time " + (tNum > 0 ? tTime / tNum : 0));
     } finally {
       runLock.writeLock().unlock();
     }
   }
 
-  // TODO
-  public void abort() {
-    // we could probably do without this
-    for (MVTOTransaction<K> ta : transactions.values())
+  public void timeout(long timeout) {
+    long current = System.currentTimeMillis();
+    for (MVTOTransaction<K> ta : getTransactions())
       try {
-        ta.releaseTimestamp();
-      } catch (IOException e) {
-        e.printStackTrace();
+        ta.timeout(current, timeout);
+      } catch (Throwable t) {
+        LOG.error("Failed to timeout transaction " + ta, t);
       }
   }
 
   public void stopped() {
-    // nothing to do here
+    runLock.readLock().lock();
+    try {
+      if (!running)
+        return;
+    } finally {
+      runLock.readLock().lock();
+    }
+    runLock.writeLock().lock();
+    try {
+      running = false;
+    } finally {
+      runLock.writeLock().unlock();
+    }
   }
 
   @Override
   public void beforeGet(TID tid, final Iterable<? extends K> keys)
       throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.beforeGet(keys);
@@ -266,7 +307,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void afterGet(TID tid, final Iterable<? extends KeyVersions<K>> kvs)
       throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.afterGet(kvs);
@@ -277,7 +318,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void failedGet(TID tid, final Iterable<? extends K> keys,
       final Throwable t) throws TransactionAbortedException, IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.failedGet(keys, t);
@@ -288,7 +329,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void beforePut(TID tid, final Iterable<? extends K> keys)
       throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.beforePut(keys);
@@ -299,7 +340,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void afterPut(TID tid, final Iterable<? extends K> keys)
       throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.afterPut(keys);
@@ -310,7 +351,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void failedPut(TID tid, final Iterable<? extends K> keys,
       final Throwable t) throws TransactionAbortedException, IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.failedPut(keys, t);
@@ -321,7 +362,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void beforeDelete(TID tid, final Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.beforeDelete(keys);
@@ -332,7 +373,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void failedDelete(TID tid, final Iterable<? extends K> keys,
       final Throwable t) throws TransactionAbortedException, IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.failedDelete(keys, t);
@@ -343,7 +384,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void afterDelete(TID tid, final Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException {
-    new WithReadLock() {
+    new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.afterDelete(keys);
@@ -367,8 +408,11 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
 
   @Override
   public void commit(final TID tid) throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       void execute(MVTOTransaction<K> ta) throws IOException {
+        if (closing)
+          throw new IllegalStateException(
+              "Cannot accept new commits while closing");
         ta.commit();
         System.out.println("Committed " + tid);
       }
@@ -377,7 +421,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
 
   @Override
   public void abort(final TID tid) throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.abort();
         System.out.println("Aborted " + tid);
@@ -385,7 +429,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }.run(tid);
   }
 
-  abstract class WithReadLock {
+  abstract class IfRunning {
     void run(TID id) throws IOException {
       runLock.readLock().lock();
       try {
@@ -415,10 +459,6 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }
   }
 
-  Lock getLock() {
-    return runLock.readLock();
-  }
-
   void lock(Key key) {
     Lock keyLock = keyLocks.get(key);
     if (keyLock == null) {
@@ -442,12 +482,6 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }
   }
 
-  /**
-   * Get the transaction object for the given timestamp
-   * 
-   * @param tid
-   * @return
-   */
   MVTOTransaction<K> getTransaction(TID tid) {
     synchronized (transactions) {
       return transactions.get(tid);
@@ -552,31 +586,59 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   // garbage collection
   @Override
   public void reclaimed(long ts) {
-    updateReclaimables();
-    Long cutoff = null;
-    for (MVTOTransaction<K> ta : getTransactions()) {
-      long sid = ta.getSID();
-      if (timestampManager.compare(ta.getID().getTS(), ts) <= 0) {
-        // find the smallest sequence number of transactions that are reclaimed
-        if (cutoff == null || transactionLog.compare(cutoff, sid) < 0)
-          cutoff = sid;
-        reclaim(ta);
-      } else {
-        if (cutoff == null)
-          break;
-        // if any transaction with higher timestamp (started later globally)
-        // has a lower sequence number (started earlier locally), increase the
-        // cutoff, because we don't want to discard its log records
-        if (transactionLog.compare(cutoff, sid) > 0)
-          cutoff = ta.getSID();
-      }
-    }
-    if (cutoff != null)
+    runLock.readLock().lock();
+    try {
+      reclaimLock.writeLock().lock();
       try {
-        transactionLog.truncate(cutoff);
-      } catch (IOException e) {
-        e.printStackTrace();
+        updateReclaimables();
+        Long cutoff = null;
+        Iterator<MVTOTransaction<K>> it = getTransactions().iterator();
+
+        // reclaim transactions up to reclaim timestamp or first non-finalized
+        while (it.hasNext()) {
+          MVTOTransaction<K> ta = it.next();
+          long tts = ta.getID().getTS();
+          // transaction not yet globally reclaimable
+          if (timestampManager.compare(tts, ts) > 0) {
+            reclaimed = ts;
+            break;
+          }
+          // transaction not yet locally reclaimable
+          if (!reclaim(ta)) {
+            reclaimed = tts - 1;
+            break;
+          }
+          // try to increment SID
+          long sid = ta.getSID();
+          if (cutoff == null || transactionLog.compare(cutoff, sid) < 0)
+            cutoff = sid;
+        }
+
+        /*
+         * if we reclaimed a transaction and want to truncate the log, we need
+         * to make sure there is not an active transaction with a higher
+         * sequence ID. That would be the case if the transaction started later
+         * globally, but earlier locally.
+         */
+        if (cutoff != null) {
+          while (it.hasNext()) {
+            MVTOTransaction<K> ta = it.next();
+            long sid = ta.getSID();
+            if (transactionLog.compare(cutoff, sid) > 0)
+              cutoff = sid;
+          }
+          try {
+            transactionLog.truncate(cutoff);
+          } catch (IOException e) {
+            LOG.error("Failed to truncate transaction log", e);
+          }
+        }
+      } finally {
+        reclaimLock.writeLock().unlock();
       }
+    } finally {
+      runLock.readLock().unlock();
+    }
   }
 
   private void updateReclaimables() {
@@ -590,24 +652,24 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }
   }
 
-  protected void reclaim(MVTOTransaction<K> ta) {
+  protected boolean reclaim(MVTOTransaction<K> ta) {
     switch (ta.getState()) {
     case CREATED:
       removeTransaction(ta);
-      break;
+      return true;
     case STARTED:
     case BLOCKED:
       System.out.println("WARNING: found active TAs before oldest timestamp "
           + ta);
-      try {
-        ta.abort();
-      } catch (IOException e) {
-        e.printStackTrace();
-      }
       break;
     case ABORTED:
     case COMMITTED:
-      // still needs to be finalized
+      try {
+        ta.finalize();
+        return reclaim(ta);
+      } catch (Throwable t) {
+        LOG.error("Retried abort finalized failed for " + ta, t);
+      }
       break;
     case FINALIZED:
       /*
@@ -615,10 +677,13 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
        * this one have completed
        */
       ta.removeReads();
-      if (reclaimables.remove(ta))
+      if (reclaimables.remove(ta)) {
         removeTransaction(ta);
+        return true;
+      }
       break;
     }
+    return false;
   }
 
   protected void replay(long sid, R record) {
@@ -685,29 +750,26 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     throw new IllegalStateException("Invalid log record: " + record);
   }
 
-  // technically we don't need to abort
   protected void recover(MVTOTransaction<K> ta) {
-    try {
-      TID tid = ta.getID();
-      switch (ta.getState()) {
-      case CREATED:
-        throw new IllegalStateException("Created transaction during recovery");
-      case STARTED:
-        // TODO check if any operations failed in the middle
-        if (!timestampManager.isHeldByCaller(tid.getTS()))
-          ta.abort();
-      case BLOCKED:
-        throw new IllegalStateException("Blocked transaction during recovery");
-      case ABORTED:
-      case COMMITTED:
+    switch (ta.getState()) {
+    case CREATED:
+    case BLOCKED:
+      throw new IllegalStateException(
+          "Transaction in transient state during recovery");
+    case STARTED:
+      // TODO conditions where we should abort here?
+      break;
+    case ABORTED:
+    case COMMITTED:
+      try {
         ta.finalize();
-        break;
-      case FINALIZED:
-        // nothing to do here, but be happy
-        break;
+      } catch (Throwable t) {
+        LOG.error("Finalize during recovery failed for " + ta, t);
       }
-    } catch (IOException e) {
-      e.printStackTrace();
+      break;
+    case FINALIZED:
+      // nothing to do here, but be happy
+      break;
     }
   }
 

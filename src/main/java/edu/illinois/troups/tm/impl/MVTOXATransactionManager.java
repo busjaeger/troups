@@ -6,6 +6,9 @@ import static edu.illinois.troups.tm.XATransactionState.PREPARED;
 
 import java.io.IOException;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyValueStore;
 import edu.illinois.troups.tm.TID;
@@ -19,6 +22,9 @@ import edu.illinois.troups.tsm.SharedTimestampManager;
 
 public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
     extends MVTOTransactionManager<K, R> implements XATransactionManager {
+
+  private static final Log LOG = LogFactory
+      .getLog(MVTOXATransactionManager.class);
 
   public MVTOXATransactionManager(KeyValueStore<K> keyValueStore,
       XATransactionLog<K, R> log, SharedTimestampManager timestampManager) {
@@ -40,10 +46,18 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
     runLock.readLock().lock();
     try {
       checkRunning();
-      MVTOXATransaction<K> ta = new MVTOXATransaction<K>(this);
-      ta.join(tid);
-      addTransaction(ta);
-      return ta.getID();
+      reclaimLock.readLock().lock();
+      try {
+        // if the transaction is reclaimed, don't allow it in
+        if (timestampManager.compare(tid.getTS(), reclaimed) < 0)
+          throw new IllegalArgumentException("Already reclaimed " + tid);
+        MVTOXATransaction<K> ta = new MVTOXATransaction<K>(this);
+        ta.join(tid);
+        addTransaction(ta);
+        return ta.getID();
+      } finally {
+        reclaimLock.readLock().unlock();
+      }
     } finally {
       runLock.readLock().unlock();
     }
@@ -51,7 +65,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
 
   @Override
   public void prepare(final XID xid) throws IOException {
-    new WithReadLock() {
+    new IfRunning() {
       void execute(MVTOTransaction<K> ta) throws IOException {
         if (!(ta instanceof MVTOXATransaction))
           throw new IllegalStateException("Cannot prepare non XA transaction");
@@ -64,7 +78,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
   @Override
   public void commit(XID xid, boolean onePhase) throws IOException {
     if (onePhase) {
-      new WithReadLock() {
+      new IfRunning() {
         @Override
         void execute(MVTOTransaction<K> ta) throws IOException {
           MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
@@ -104,8 +118,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
         if (ta != null)
           throw new IllegalStateException(
               "join record for existing transaction");
-        MVTOXATransaction<K> xta = new MVTOXATransaction<K>(
-            this);
+        MVTOXATransaction<K> xta = new MVTOXATransaction<K>(this);
         xta.setJoined((XID) record.getTID(), sid);
         addTransaction(ta);
         return;
@@ -118,73 +131,54 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
 
   @Override
   protected void recover(MVTOTransaction<K> ta) {
-    try {
-      switch (ta.getState()) {
-      case JOINED: {
-        MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
-        XID xid = xta.getID();
-        try {
-          // TODO check if any operations failed in the middle
-          // still a chance to complete this transaction, could also just abort
-          if (!getTimestampManager().isReleased(xid.getTS())
-              && getTimestampManager().isReferenceHeldByMe(xid.getTS(),
-                  xid.getPid()))
-            return;
-        } catch (NoSuchTimestampException e) {
-          // fall through
+    switch (ta.getState()) {
+    case JOINED: {
+      // TODO conditions where we should abort here?
+      return;
+    }
+    case PREPARED: {
+      MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
+      XID xid = xta.getID();
+      // first try to figure out if we need to commit
+      try {
+        if (getTimestampManager().isReferencePersisted(xid.getTS(),
+            xid.getPid())) {
+          xta.commit();
         }
-        xta.abort();
-        return;
+      } catch (NoSuchTimestampException e) {
+        // fall through
+      } catch (IOException e) {
+        LOG.error("Commit prepared tran failed during recovery " + ta, e);
       }
-      case PREPARED: {
-        MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
-        XID xid = xta.getID();
-        // first try to figure out if we need to commit
-        try {
-          if (getTimestampManager().isReferencePersisted(xid.getTS(),
-              xid.getPid())) {
-            xta.commit();
-            return;
-          }
-        } catch (NoSuchTimestampException e) {
-          // fall through
-        }
-        // TODO check if any operations failed in the middle
-        // if not, check if the transaction is still active, could also abort
-        try {
-          if (!getTimestampManager().isReleased(xid.getTS())
-              && getTimestampManager().isReferenceHeldByMe(xid.getTS(),
-                  xid.getPid()))
-            return;
-        } catch (NoSuchTimestampException e) {
-          // fall through
-        }
-        // otherwise safe and probably best to abort
-        xta.abort();
-        return;
-      }
-      }
-    } catch (IOException e) {
-      // TODO Auto-generated catch block
-      e.printStackTrace();
+      // TODO conditions where we should abort here?
+      return;
+    }
     }
     super.recover(ta);
   }
 
   @Override
-  protected void reclaim(MVTOTransaction<K> ta) {
+  protected boolean reclaim(MVTOTransaction<K> ta) {
     switch (ta.getState()) {
     case JOINED:
+      return false;
     case PREPARED:
-      // we could double-check with TSM that prepare really is aborted
+      MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
+      XID xid = xta.getID();
       try {
-        ta.abort();
+        if (getTimestampManager().isReferencePersisted(xid.getTS(),
+            xid.getPid())) {
+          xta.commit();
+          return reclaim(ta);
+        }
+      } catch (NoSuchTimestampException e) {
+        // fall through
       } catch (IOException e) {
-        e.printStackTrace();
+        LOG.error("Commit prepared tran failed during recovery " + ta, e);
       }
-      return;
+      return false;
     }
-    super.reclaim(ta);
+    return super.reclaim(ta);
   }
 
 }

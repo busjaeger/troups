@@ -1,11 +1,13 @@
 package edu.illinois.troups.tmg.impl;
 
-import static edu.illinois.troups.Constants.DEFAULT_TM_LOG_IMPL;
-import static edu.illinois.troups.Constants.DEFAULT_TM_LOG_TABLE_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_LOG_IMPL;
+import static edu.illinois.troups.Constants.DEFAULT_LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.DEFAULT_TM_THREAD_COUNT;
-import static edu.illinois.troups.Constants.TM_LOG_IMPL;
-import static edu.illinois.troups.Constants.TM_LOG_TABLE_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_TRANSACTION_TIMEOUT;
+import static edu.illinois.troups.Constants.LOG_IMPL;
+import static edu.illinois.troups.Constants.LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.TM_THREAD_COUNT;
+import static edu.illinois.troups.Constants.TRANSACTION_TIMEOUT;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -22,6 +24,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -64,6 +67,7 @@ import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.XATransactionLog;
 import edu.illinois.troups.tm.XID;
+import edu.illinois.troups.tm.impl.MVTOTransactionManager;
 import edu.illinois.troups.tm.impl.MVTOXATransactionManager;
 import edu.illinois.troups.tmg.CrossGroupTransactionManager;
 import edu.illinois.troups.tmg.GroupTransactionManager;
@@ -80,17 +84,20 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
       .getComparatorIgnoringTimestamps();
 
-  private final ConcurrentMap<HKey, MVTOXATransactionManager<HKey, HRecord>> groupTMs = new ConcurrentHashMap<HKey, MVTOXATransactionManager<HKey, HRecord>>();
+  private final ConcurrentMap<HKey, MVTOXATransactionManager<HKey, HRecord>> tms = new ConcurrentHashMap<HKey, MVTOXATransactionManager<HKey, HRecord>>();
   private boolean started = false;
   private HRegion region;
   private RowGroupPolicy groupPolicy;
-
   private GroupLogStore logStore;
-  private ZKSharedTimestampManager tsm;
   private ScheduledExecutorService pool;
+  private long transactionTimeout;
+
+  private ZKSharedTimestampManager tsm;
+
   private TimestampReclaimer collector;
   private volatile long lrt;
 
+  // temporary to measure response time
   private long beginN;
   private long beginT;
   private long preGetN;
@@ -105,7 +112,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private long commitT;
 
   private MVTOXATransactionManager<HKey, HRecord> getTM(HKey groupKey) {
-    MVTOXATransactionManager<HKey, HRecord> tm = groupTMs.get(groupKey);
+    MVTOXATransactionManager<HKey, HRecord> tm = tms.get(groupKey);
     if (tm == null)
       throw new IllegalStateException("No transaction started for group "
           + groupKey);
@@ -114,12 +121,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   // TODO should also remove TMs when they are no longer used
   private MVTOXATransactionManager<HKey, HRecord> demandTM(HKey groupKey) {
-    MVTOXATransactionManager<HKey, HRecord> tm = groupTMs.get(groupKey);
+    MVTOXATransactionManager<HKey, HRecord> tm = tms.get(groupKey);
     if (tm == null) {
       XATransactionLog<HKey, HRecord> logWrapper = new HCrossGroupTransactionLog(
           groupKey, logStore);
       tm = new MVTOXATransactionManager<HKey, HRecord>(this, logWrapper, tsm);
-      MVTOXATransactionManager<HKey, HRecord> existing = groupTMs.putIfAbsent(
+      MVTOXATransactionManager<HKey, HRecord> existing = tms.putIfAbsent(
           groupKey, tm);
       if (existing != null)
         tm = existing;
@@ -135,21 +142,24 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (env.getRegion().getRegionInfo().isMetaTable())
       return;
 
-    Configuration conf = env.getConfiguration();
-    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
     region = env.getRegion();
     groupPolicy = RowGroupSplitPolicy.getRowGroupStrategy(region);
 
     // create thread pool
+    Configuration conf = env.getConfiguration();
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
     pool = Executors.newScheduledThreadPool(count);
 
+    transactionTimeout = conf.getLong(TRANSACTION_TIMEOUT,
+        DEFAULT_TRANSACTION_TIMEOUT);
+
     // create time-stamp manager
+    ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
     tsm = new ZKSharedTimestampManager(zkw);
     tsm.addTimestampReclamationListener(this);
 
     // create a log store
-    String logImpl = conf.get(TM_LOG_IMPL, DEFAULT_TM_LOG_IMPL);
+    String logImpl = conf.get(LOG_IMPL, DEFAULT_LOG_IMPL);
     if ("file".equals(logImpl)) {
       FileSystem fs = region.getFilesystem();
       Path groupsDir = new Path(region.getRegionDir().getParent(), "groups");
@@ -175,19 +185,26 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       return;
     tsm.start();
     collector.start();
+    // run transaction timeout thread every 5 seconds
+    pool.scheduleAtFixedRate(new Runnable() {
+      public void run() {
+        for (MVTOTransactionManager<HKey, HRecord> tm : tms.values())
+          tm.timeout(transactionTimeout);
+      }
+    }, 0, 5, TimeUnit.SECONDS);
   }
 
   @Override
   public void postOpen(ObserverContext<RegionCoprocessorEnvironment> e) {
-
+    // TODO start up transaction managers?
   }
 
   @Override
   public void preClose(ObserverContext<RegionCoprocessorEnvironment> e,
       boolean abortRequested) {
-    // TODO accept no further begins
     if (!started)
       return;
+
     LOG.info("begin time: " + average(beginT, beginN));
     LOG.info("preGet time: " + average(preGetT, preGetN));
     LOG.info("postGet time: " + average(postGetT, postGetN));
@@ -195,12 +212,19 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     LOG.info("postPut time: " + average(postPutT, postPutN));
     LOG.info("commit time " + average(commitT, commitN));
 
-    for (MVTOXATransactionManager<HKey, HRecord> tm : groupTMs.values())
-      if (abortRequested)
-        tm.abort();
-      else
-        tm.stop();
+    for (MVTOXATransactionManager<HKey, HRecord> tm : tms.values())
+      tm.stop();
+
+    // TODO graceful shutdown
     pool.shutdown();
+  }
+
+  @Override
+  public void postClose(ObserverContext<RegionCoprocessorEnvironment> e,
+      boolean abortRequested) {
+    for (MVTOXATransactionManager<HKey, HRecord> tm : tms.values())
+      tm.stopped();
+    super.postClose(e, abortRequested);
   }
 
   long average(long time, long num) {
@@ -530,10 +554,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private static HTable demandLogTable(HConnection connection,
       ExecutorService pool) throws IOException {
     Configuration conf = connection.getConfiguration();
-    byte[] tableName = toBytes(conf.get(TM_LOG_TABLE_NAME,
-        DEFAULT_TM_LOG_TABLE_NAME));
-    byte[] familyName = toBytes(conf.get(TM_LOG_TABLE_NAME,
-        DEFAULT_TM_LOG_TABLE_NAME));
+    byte[] tableName = toBytes(conf.get(LOG_TABLE_NAME, DEFAULT_LOG_TABLE_NAME));
+    byte[] familyName = toBytes(conf
+        .get(LOG_TABLE_NAME, DEFAULT_LOG_TABLE_NAME));
     // create log table if necessary
     HBaseAdmin admin = new HBaseAdmin(conf);
     if (!admin.tableExists(tableName)) {

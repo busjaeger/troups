@@ -1,9 +1,9 @@
 package edu.illinois.troups.tsm.zk;
 
-import static edu.illinois.troups.Constants.DEFAULT_TM_TSC_INTERVAL;
+import static edu.illinois.troups.Constants.DEFAULT_TSC_INTERVAL;
 import static edu.illinois.troups.Constants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.troups.Constants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
-import static edu.illinois.troups.Constants.TM_TSC_INTERVAL;
+import static edu.illinois.troups.Constants.TSC_INTERVAL;
 import static edu.illinois.troups.Constants.ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.troups.Constants.ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
 import static edu.illinois.troups.tsm.zk.Util.createWithParents;
@@ -48,7 +48,7 @@ public class TimestampReclaimer implements Runnable {
     String collectors = conf.get(ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS,
         DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS);
     this.collectorsNode = join(zkw.baseZNode, base, collectors);
-    this.interval = conf.getLong(TM_TSC_INTERVAL, DEFAULT_TM_TSC_INTERVAL);
+    this.interval = conf.getLong(TSC_INTERVAL, DEFAULT_TSC_INTERVAL);
   }
 
   public void start() {

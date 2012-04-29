@@ -27,10 +27,8 @@ import edu.illinois.troups.tm.XID;
 import edu.illinois.troups.tmg.CrossGroupTransactionManager;
 import edu.illinois.troups.tmg.impl.HKey;
 import edu.illinois.troups.tsm.SharedTimestampManager;
-import edu.illinois.troups.tsm.TimestampManager.TimestampListener;
 
-class CrossGroupTransaction extends AbstractTransaction implements Transaction,
-    TimestampListener {
+class CrossGroupTransaction extends AbstractTransaction implements Transaction {
 
   private static enum State {
     CREATED, ACTIVE, COMMITTING, ABORTED, COMMITTED
@@ -90,10 +88,6 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
     if (xid == null) {
       xid = getRTM(group).join(new HKey(row), id);
       groups.put(group, xid);
-      if (!stsm.addReferenceListener(xid.getTS(), xid.getPid(), this)) {
-        rollback();
-        throw new TransactionAbortedException();
-      }
     }
     return xid;
   }
@@ -226,24 +220,6 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
       }
     }
     state = State.COMMITTED;
-  }
-
-  /**
-   * ReferenceListener implementation
-   */
-  @Override
-  public synchronized void released(long rid) {
-    switch (state) {
-    case ACTIVE:
-      break;
-    case COMMITTING:
-    case COMMITTED:
-    case ABORTED:
-      return;
-    case CREATED:
-      throw newISA("deleted");
-    }
-    rollback();
   }
 
   private Throwable invokeAllPrepare() throws TransactionAbortedException {

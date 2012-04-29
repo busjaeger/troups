@@ -84,7 +84,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     }
   }
 
-  @Override
+  // @Override
   public boolean isHeldByCaller(long ts) throws NoSuchTimestampException,
       IOException {
     String tsNode = join(timestampsNode, ts);
@@ -128,7 +128,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     }
   }
 
-  @Override
+  // @Override
   public boolean addTimestampListener(final long ts,
       final TimestampListener listener) throws IOException {
     String tsNode = Util.join(timestampsNode, ts);

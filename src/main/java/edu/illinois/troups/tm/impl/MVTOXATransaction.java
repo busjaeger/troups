@@ -1,27 +1,25 @@
 package edu.illinois.troups.tm.impl;
 
-import static edu.illinois.troups.tm.TransactionState.ABORTED;
-import static edu.illinois.troups.tm.TransactionState.COMMITTED;
-import static edu.illinois.troups.tm.TransactionState.FINALIZED;
-import static edu.illinois.troups.tm.TransactionState.STARTED;
 import static edu.illinois.troups.tm.XATransactionState.JOINED;
 import static edu.illinois.troups.tm.XATransactionState.PREPARED;
-import static edu.illinois.troups.tm.impl.TransientTransactionState.BLOCKED;
 import static edu.illinois.troups.tm.impl.TransientTransactionState.CREATED;
 
 import java.io.IOException;
 
-import edu.illinois.troups.tm.XATransactionLog;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
+import edu.illinois.troups.tm.XATransactionLog;
 import edu.illinois.troups.tm.XID;
 import edu.illinois.troups.tsm.NoSuchTimestampException;
 import edu.illinois.troups.tsm.SharedTimestampManager;
-import edu.illinois.troups.tsm.TimestampManager.TimestampListener;
 
-public class MVTOXATransaction<K extends Key> extends
-    MVTOTransaction<K> implements TimestampListener {
+public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
+
+  private static final Log LOG = LogFactory.getLog(MVTOXATransaction.class);
 
   public MVTOXATransaction(MVTOXATransactionManager<K, ?> tm) {
     super(tm);
@@ -33,13 +31,13 @@ public class MVTOXATransaction<K extends Key> extends
   }
 
   @Override
-  protected boolean isActive() {
+  protected boolean isRunning() {
     switch (state) {
     case JOINED:
     case PREPARED:
       return true;
     }
-    return super.isActive();
+    return super.isRunning();
   }
 
   public synchronized void join(TID id) throws IOException {
@@ -47,7 +45,6 @@ public class MVTOXATransaction<K extends Key> extends
     long ts = id.getTS();
     long pid = getTimestampManager().acquireReference(ts);
     XID xid = new XID(ts, pid);
-    getTimestampManager().addTimestampListener(ts, this);
     long sid = getTransactionLog().appendXAStateTransition(xid, JOINED);
     setJoined(xid, sid);
   }
@@ -107,37 +104,12 @@ public class MVTOXATransaction<K extends Key> extends
   protected boolean shouldAbort() {
     switch (state) {
     case PREPARED:
+      // check timestamp service here?
       return true;
     case JOINED:
       return true;
     default:
       return super.shouldAbort();
-    }
-  }
-
-  /**
-   * Transaction has been aborted: note this method will only be called if the
-   * prepare phase was unsuccessful.
-   * 
-   * @param ts
-   */
-  @Override
-  public synchronized void released(long ts) {
-    switch (state) {
-    case FINALIZED:
-    case COMMITTED:
-    case ABORTED:
-      return;
-    case STARTED:
-    case BLOCKED:
-      break;
-    case CREATED:
-      throw newISA("deleted");
-    }
-    try {
-      abort();
-    } catch (IOException e) {
-      e.printStackTrace();
     }
   }
 
@@ -148,6 +120,26 @@ public class MVTOXATransaction<K extends Key> extends
     } catch (NoSuchTimestampException e) {
       // ignore
     }
+  }
+
+  @Override
+  public synchronized void timeout(long current, long timeout)
+      throws IOException {
+    if (state == PREPARED && (current - lastTouched) < timeout) {
+      try {
+        if (getTimestampManager().isReferencePersisted(getID().getTS(),
+            getID().getPid())) {
+          commit();
+          return;
+        }
+      } catch (NoSuchTimestampException e) {
+        // fall through
+      } catch (IOException e) {
+        LOG.error("Timeout commit failed " + this, e);
+        return;
+      }
+    }
+    super.timeout(current, timeout);
   }
 
   @Override

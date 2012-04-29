@@ -17,6 +17,9 @@ import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Set;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyVersions;
 import edu.illinois.troups.tm.TID;
@@ -24,8 +27,9 @@ import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.TransactionLog;
 import edu.illinois.troups.tsm.TimestampManager;
 
-class MVTOTransaction<K extends Key> implements
-    Comparable<MVTOTransaction<K>> {
+class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
+
+  private static final Log LOG = LogFactory.getLog(MVTOTransaction.class);
 
   // immutable state
   protected final MVTOTransactionManager<K, ?> tm;
@@ -34,6 +38,7 @@ class MVTOTransaction<K extends Key> implements
   protected TID id;
   protected long sid;
   protected int state;
+  protected long lastTouched;
   private final Map<K, Long> reads;
   private final Map<K, Boolean> writes;
   private final Set<MVTOTransaction<K>> readFrom;
@@ -70,6 +75,7 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void setStarted(TID id, long sid) {
+    this.lastTouched = System.currentTimeMillis();
     this.id = id;
     this.sid = sid;
     this.state = STARTED;
@@ -82,7 +88,12 @@ class MVTOTransaction<K extends Key> implements
     waitForReadFrom();
     getTransactionLog().appendStateTransition(id, COMMITTED);
     setCommitted();
-    finalizeCommit();
+    try {
+      finalizeCommit();
+    } catch (Throwable t) {
+      // will retry later: commit itself was OK
+      LOG.error("Failed to finalize transaction " + this + " error: " + t);
+    }
   }
 
   protected boolean shouldCommit() {
@@ -98,6 +109,7 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void setCommitted() {
+    this.lastTouched = System.currentTimeMillis();
     this.state = COMMITTED;
   }
 
@@ -108,7 +120,12 @@ class MVTOTransaction<K extends Key> implements
     if (state == BLOCKED)
       notify();
     setAborted();
-    finalizeAbort();
+    try {
+      finalizeAbort();
+    } catch (Throwable t) {
+      // will retry later: commit itself was OK
+      LOG.error("Failed to finalize transaction " + this + " error: " + t);
+    }
   }
 
   protected boolean shouldAbort() {
@@ -125,9 +142,16 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void setAborted() {
+    this.lastTouched = System.currentTimeMillis();
     this.state = ABORTED;
     // This TA should no longer cause write conflicts, since it's aborted
     removeReads();
+  }
+
+  public synchronized void timeout(long current, long timeout)
+      throws IOException {
+    if (isRunning() && (current - lastTouched) < timeout)
+      abort();
   }
 
   public final synchronized void finalize() throws IOException {
@@ -185,8 +209,10 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void setCommitFinalized() {
+    this.lastTouched = System.currentTimeMillis();
     notifyReadBy();
     state = FINALIZED;
+    tm.addActiveReader(this);
   }
 
   protected void finalizeAbort() throws IOException {
@@ -217,7 +243,9 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void setAbortFinalized() {
+    this.lastTouched = System.currentTimeMillis();
     state = FINALIZED;
+    tm.addActiveReader(this);
   }
 
   protected void releaseTimestamp() throws IOException {
@@ -227,7 +255,7 @@ class MVTOTransaction<K extends Key> implements
   }
 
   public final synchronized void beforeGet(Iterable<? extends K> keys) {
-    checkActive();
+    checkRunning();
     tm.addActiveReader(this);
   }
 
@@ -244,7 +272,7 @@ class MVTOTransaction<K extends Key> implements
    */
   public final synchronized void afterGet(Iterable<? extends KeyVersions<K>> kvs)
       throws IOException {
-    checkActive();
+    checkRunning();
     tm.removeActiveReader(this);
     for (KeyVersions<K> kv : kvs) {
       K key = kv.getKey();
@@ -283,8 +311,7 @@ class MVTOTransaction<K extends Key> implements
            * transaction had already read the older value, the writer would have
            * never been admitted)
            */
-          NavigableSet<MVTOTransaction<K>> writes = tm
-              .getActiveWriters(key);
+          NavigableSet<MVTOTransaction<K>> writes = tm.getActiveWriters(key);
           if (writes != null) {
             MVTOTransaction<K> lastWrite = writes.lower(this);
             if (lastWrite != null
@@ -313,9 +340,10 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void addGet(K key, long version) {
+    this.lastTouched = System.currentTimeMillis();
     MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
     // if value is not yet committed, add a dependency in case writer aborts
-    if (writer != null && writer.isActive()) {
+    if (writer != null && writer.isRunning()) {
       writer.readBy.add(this);
       this.readFrom.add(writer);
     }
@@ -325,7 +353,7 @@ class MVTOTransaction<K extends Key> implements
 
   public final synchronized void failedGet(Iterable<? extends K> keys,
       Throwable t) {
-    checkActive();
+    checkRunning();
     tm.removeActiveReader(this);
   }
 
@@ -361,7 +389,7 @@ class MVTOTransaction<K extends Key> implements
 
   private void beforeMutation(boolean isDelete, Iterable<? extends K> keys)
       throws IOException {
-    checkActive();
+    checkRunning();
     for (K key : keys) {
       tm.lock(key);
       try {
@@ -370,8 +398,8 @@ class MVTOTransaction<K extends Key> implements
             .getReaders(key);
         if (versions != null) {
           // reduce to versions that were written before this TA started
-          for (NavigableSet<MVTOTransaction<K>> readers : versions
-              .headMap(id.getTS(), false).values()) {
+          for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
+              id.getTS(), false).values()) {
             // check if any version has been read by a TA that started after
             // this TA
             MVTOTransaction<K> reader = readers.higher(this);
@@ -406,11 +434,12 @@ class MVTOTransaction<K extends Key> implements
 
   // in-memory state transition
   protected void addMutation(K key, boolean isDelete) {
+    this.lastTouched = System.currentTimeMillis();
     writes.put(key, isDelete);
   }
 
   private void afterMutation(boolean isDelete, Iterable<? extends K> keys) {
-    checkActive();
+    checkRunning();
     for (K key : keys) {
       tm.lock(key);
       try {
@@ -430,12 +459,12 @@ class MVTOTransaction<K extends Key> implements
   // used by state transitions methods and recovery process
   // ----------------------------------------------------------------------
 
-  protected void checkActive() {
-    if (!isActive())
+  protected void checkRunning() {
+    if (!isRunning())
       throw newISA("read");
   }
 
-  protected boolean isActive() {
+  protected boolean isRunning() {
     return state == STARTED;
   }
 
@@ -468,7 +497,6 @@ class MVTOTransaction<K extends Key> implements
     while (!readFrom.isEmpty()) {
       state = BLOCKED;
       try {
-        // TODO add timeout
         wait();
       } catch (InterruptedException e) {
         Thread.interrupted();

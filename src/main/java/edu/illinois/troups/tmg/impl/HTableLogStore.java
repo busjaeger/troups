@@ -1,7 +1,7 @@
 package edu.illinois.troups.tmg.impl;
 
-import static edu.illinois.troups.Constants.DEFAULT_TM_LOG_TABLE_NAME;
-import static edu.illinois.troups.Constants.TM_LOG_TABLE_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_LOG_TABLE_NAME;
+import static edu.illinois.troups.Constants.LOG_TABLE_NAME;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -24,7 +24,7 @@ public class HTableLogStore implements GroupLogStore {
     this.logTable = logTable;
     this.tableName = tableName;
     this.familyName = toBytes(logTable.getConfiguration().get(
-        TM_LOG_TABLE_NAME, DEFAULT_TM_LOG_TABLE_NAME));
+        LOG_TABLE_NAME, DEFAULT_LOG_TABLE_NAME));
   }
 
   @Override

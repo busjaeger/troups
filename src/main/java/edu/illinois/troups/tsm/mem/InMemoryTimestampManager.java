@@ -53,7 +53,7 @@ public class InMemoryTimestampManager implements TimestampManager {
     return false;
   }
 
-  @Override
+  // @Override
   public boolean addTimestampListener(long ts, TimestampListener listener)
       throws IOException {
     List<TimestampListener> tsListeners = timestamps.get(ts);
@@ -86,7 +86,7 @@ public class InMemoryTimestampManager implements TimestampManager {
     return o1.compareTo(o2);
   }
 
-  @Override
+  // @Override
   public boolean isHeldByCaller(long ts) throws NoSuchTimestampException,
       IOException {
     // in-memory always held by caller if present
