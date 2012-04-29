@@ -20,7 +20,7 @@ import edu.illinois.troups.client.Put;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tmg.impl.HRegionTransactionManager;
+import edu.illinois.troups.tm.region.HRegionTransactionManager;
 
 public class RandomRowTransactions {
 

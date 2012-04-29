@@ -23,7 +23,7 @@ import edu.illinois.troups.test.StringKeyValueStore;
 import edu.illinois.troups.test.StringKeyVersions;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tm.impl.MVTOTransactionManager;
+import edu.illinois.troups.tm.mvto.MVTOTransactionManager;
 import edu.illinois.troups.tsm.TimestampManager;
 import edu.illinois.troups.tsm.mem.InMemoryTimestampManager;
 

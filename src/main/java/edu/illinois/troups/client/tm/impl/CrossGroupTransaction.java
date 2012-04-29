@@ -24,8 +24,8 @@ import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.XID;
-import edu.illinois.troups.tmg.CrossGroupTransactionManager;
-import edu.illinois.troups.tmg.impl.HKey;
+import edu.illinois.troups.tm.region.CrossGroupTransactionManager;
+import edu.illinois.troups.tm.region.HKey;
 import edu.illinois.troups.tsm.SharedTimestampManager;
 
 class CrossGroupTransaction extends AbstractTransaction implements Transaction {

@@ -31,6 +31,7 @@ import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.data.Stat;
 
 import edu.illinois.troups.tsm.NoSuchTimestampException;
+import edu.illinois.troups.tsm.ReclaimableTimestampManager;
 
 public class ZKTimestampManager extends ZooKeeperListener implements
     ReclaimableTimestampManager {
@@ -53,10 +54,6 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     this.timestampsNode = join(baseNode, timestamps);
     this.timestampsDir = Util.toDir(timestampsNode);
     this.lrtNode = join(baseNode, lrt);
-  }
-
-  public void start() {
-    watcher.registerListener(this);
   }
 
   @Override
@@ -164,9 +161,14 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   @Override
   public void addTimestampReclamationListener(
       TimestampReclamationListener listener) {
+    synchronized (this) {
+      if (listeners.isEmpty())
+        watcher.registerListener(this);
+    }
     listeners.add(listener);
   }
 
+  // TODO this method does not work
   @Override
   public long getLastCreatedTimestamp() throws IOException {
     Stat stat = new Stat();

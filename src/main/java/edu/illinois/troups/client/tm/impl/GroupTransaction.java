@@ -10,8 +10,8 @@ import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tmg.GroupTransactionManager;
-import edu.illinois.troups.tmg.impl.HKey;
+import edu.illinois.troups.tm.region.GroupTransactionManager;
+import edu.illinois.troups.tm.region.HKey;
 
 public class GroupTransaction extends AbstractTransaction implements
     Transaction {

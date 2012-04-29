@@ -15,14 +15,14 @@ public final class Util {
     super();
   }
 
-  static String create(ZooKeeperWatcher zkw, String znode, byte[] data,
+  public static String create(ZooKeeperWatcher zkw, String znode, byte[] data,
       CreateMode mode) throws InterruptedException, KeeperException {
     ZKUtil.waitForZKConnectionIfAuthenticating(zkw);
     return zkw.getRecoverableZooKeeper().getZooKeeper()
         .create(znode, data, Ids.OPEN_ACL_UNSAFE, mode);
   }
 
-  static String createWithParents(ZooKeeperWatcher zkw, String znode,
+  public static String createWithParents(ZooKeeperWatcher zkw, String znode,
       byte[] data, CreateMode mode) throws KeeperException,
       InterruptedException {
     try {
@@ -36,7 +36,7 @@ public final class Util {
     }
   }
 
-  static boolean setWatch(ZooKeeperWatcher zkw, String znode, Watcher watcher)
+  public static boolean setWatch(ZooKeeperWatcher zkw, String znode, Watcher watcher)
       throws KeeperException, InterruptedException {
     try {
       ZKUtil.waitForZKConnectionIfAuthenticating(zkw);
@@ -47,34 +47,34 @@ public final class Util {
     }
   }
 
-  static String join(String base, long id) {
+  public static String join(String base, long id) {
     return join(base, fromId(id));
   }
 
-  static String join(String base, long id, long id2) {
+  public static String join(String base, long id, long id2) {
     return join(base, fromId(id), fromId(id2));
   }
 
-  static String join(String base, String path) {
+  public static String join(String base, String path) {
     return base + ZK_SEP + path;
   }
 
-  static String join(String base, String path, String path2) {
+  public static String join(String base, String path, String path2) {
     return base + ZK_SEP + path + ZK_SEP + path2;
   }
 
-  static String toDir(String node) {
+  public static String toDir(String node) {
     return new StringBuilder(node.length() + 1).append(node).append(ZK_SEP)
         .toString();
   }
 
-  static long getId(String node) {
+  public static long getId(String node) {
     String nodeName = ZKUtil.getNodeName(node);
     String id = nodeName.substring(nodeName.length() - 10, nodeName.length());
     return Long.parseLong(id);
   }
 
-  static String fromId(long id) {
+  public static String fromId(long id) {
     String path = String.valueOf(id);
     int padding = 10 - path.length();
     if (padding > 0) {

@@ -5,7 +5,7 @@ import java.util.NavigableMap;
 import java.util.TreeMap;
 
 import edu.illinois.troups.tm.TID;
-import edu.illinois.troups.tm.TransactionLog;
+import edu.illinois.troups.tm.log.TransactionLog;
 
 public class StringKeyLog implements
     TransactionLog<StringKey, StringKeyLogRecord> {

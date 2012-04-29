@@ -1,7 +1,7 @@
 package edu.illinois.troups.test;
 
 import edu.illinois.troups.tm.TID;
-import edu.illinois.troups.tm.TransactionLog.Record;
+import edu.illinois.troups.tm.log.TransactionLog.Record;
 
 public class StringKeyLogRecord implements Record<StringKey> {
 

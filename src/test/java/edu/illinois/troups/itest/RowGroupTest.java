@@ -23,7 +23,7 @@ import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tmg.impl.HRegionTransactionManager;
+import edu.illinois.troups.tm.region.HRegionTransactionManager;
 
 /**
  * This test case illustrates how two entities can be mapped to the same HBase

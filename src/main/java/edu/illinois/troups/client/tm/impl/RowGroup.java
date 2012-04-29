@@ -3,7 +3,7 @@ package edu.illinois.troups.client.tm.impl;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.util.Bytes;
 
-import edu.illinois.troups.tmg.impl.HKey;
+import edu.illinois.troups.tm.region.HKey;
 
 class RowGroup {
 
