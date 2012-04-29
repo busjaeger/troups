@@ -3,19 +3,25 @@ package edu.illinois.troups.client.tm.impl;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.util.Bytes;
 
+import edu.illinois.troups.tmg.impl.HKey;
+
 class RowGroup {
 
   private final HTable table;
   // table name assumed to stay constant for lifetime of instance
   private final byte[] tableName;
-  private final byte[] rootRow;
+  private final HKey groupKey;
   // cache for efficient hashCode() and equals()
   private Integer hashCode;
 
-  public RowGroup(HTable table, byte[] rootRow) {
+  public RowGroup(HTable table, byte[] row) {
+    this(table, table.getTableName(), new HKey(row));
+  }
+
+  public RowGroup(HTable table, byte[] tableName, HKey groupKey) {
     this.table = table;
-    this.tableName = table.getTableName();
-    this.rootRow = rootRow;
+    this.tableName = tableName;
+    this.groupKey = groupKey;
   }
 
   public HTable getTable() {
@@ -26,8 +32,8 @@ class RowGroup {
     return tableName;
   }
 
-  public byte[] getRootRow() {
-    return rootRow;
+  public HKey getKey() {
+    return groupKey;
   }
 
   @Override
@@ -37,7 +43,7 @@ class RowGroup {
       if (hashCode() != o.hashCode())
         return false;
       return Bytes.equals(o.tableName, tableName)
-          && Bytes.equals(o.rootRow, rootRow);
+          && groupKey.equals(o.groupKey);
     }
     return false;
   }
@@ -45,7 +51,7 @@ class RowGroup {
   @Override
   public int hashCode() {
     if (hashCode == null)
-      hashCode = Bytes.hashCode(tableName) ^ Bytes.hashCode(rootRow);
+      hashCode = Bytes.hashCode(tableName) ^ groupKey.hashCode();
     return hashCode;
   }
 

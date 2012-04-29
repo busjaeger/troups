@@ -23,7 +23,7 @@ import edu.illinois.troups.client.Result;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tm.region.HRegionTransactionManager;
+import edu.illinois.troups.tmg.impl.HRegionTransactionManager;
 
 public class SingleTableTest {
 

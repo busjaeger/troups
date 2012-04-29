@@ -4,23 +4,21 @@ import java.io.IOException;
 
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
-import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.troups.Constants;
 import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tm.region.HKey;
-import edu.illinois.troups.tm.region.RTM;
+import edu.illinois.troups.tmg.GroupTransactionManager;
+import edu.illinois.troups.tmg.impl.HKey;
 
 public class GroupTransaction extends AbstractTransaction implements
     Transaction {
 
   private TID id;
   private RowGroupPolicy groupPolicy;
-  private HTable table;
-  private byte[] row;
+  private RowGroup group;
   private boolean completed = false;
 
   GroupTransaction() {
@@ -28,34 +26,30 @@ public class GroupTransaction extends AbstractTransaction implements
   }
 
   @Override
-  public TID getTID(HTable table, byte[] row) throws IOException {
+  public TID getTID(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException {
     if (completed)
       throw new IllegalStateException("Already completed");
 
     // if this is the first enlist -> begin transaction
-    if (this.table == null) {
-      RowGroupPolicy groupPolicy = RowGroupSplitPolicy
-          .getRowGroupStrategy(table);
-      if (groupPolicy != null)
-        row = groupPolicy.getGroupKey(row);
-      RTM rtm = table.coprocessorProxy(RTM.class, row);
-      this.id = rtm.begin(new HKey(row));
-      this.table = table;
-      this.row = row;
-      this.groupPolicy = groupPolicy;
+    if (this.group == null) {
+      if (policy == null)
+        policy = RowGroupSplitPolicy.getRowGroupStrategy(table);
+      if (policy != null)
+        row = policy.getGroupKey(row);
+      RowGroup group = new RowGroup(table, row);
+      this.id = getTM(group).begin(group.getKey());
+      this.groupPolicy = policy;
+      this.group = group;
     }
     // otherwise ensure this transaction remains local
     else {
-      // check same table
-      if (!Bytes.equals(this.table.getTableName(), table.getTableName()))
-        throw new IllegalArgumentException(
-            "Local transaction cannot span tables");
-      // check same row group
       if (groupPolicy != null)
         row = groupPolicy.getGroupKey(row);
-      if (!Bytes.equals(this.row, row))
+      RowGroup group = new RowGroup(table, row);
+      if (!this.group.equals(group))
         throw new IllegalArgumentException(
-            "Local transaction cannot span row groups");
+            "Group transaction cannot span groups");
     }
     return id;
   }
@@ -67,10 +61,9 @@ public class GroupTransaction extends AbstractTransaction implements
 
   @Override
   public void rollback() {
-    if (table != null) {
-      RTM rtm = table.coprocessorProxy(RTM.class, row);
+    if (group != null) {
       try {
-        rtm.abort(id);
+        getTM(group).abort(group.getKey(), id);
       } catch (IOException e) {
         throw new RuntimeException("Failed to rollback", e);
       }
@@ -80,15 +73,20 @@ public class GroupTransaction extends AbstractTransaction implements
 
   @Override
   public void commit() throws TransactionAbortedException {
-    if (table == null)
+    if (group == null)
       throw new IllegalStateException("No data to commit");
-    RTM rtm = table.coprocessorProxy(RTM.class, row);
     try {
-      rtm.commit(id);
+      getTM(group).commit(group.getKey(), id);
     } catch (IOException e) {
       throw new RuntimeException("Failed to commit", e);
     }
     completed = true;
+  }
+
+  @SuppressWarnings("unchecked")
+  GroupTransactionManager<HKey> getTM(RowGroup group) {
+    return group.getTable().coprocessorProxy(GroupTransactionManager.class,
+        group.getKey().getRow());
   }
 
 }

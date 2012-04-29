@@ -18,13 +18,19 @@ public interface Constants {
 
   // Log table schema
 
-  public static final String TM_LOG_TABLE_NAME = "troups.tm.log.table.name";
+//  public static final String TM_LOG_FAMILY_NAME = "troups.tm.log.family.name";
 
-  public static final String DEFAULT_TM_LOG_TABLE_NAME = "troups";
+  public static final String TM_LOG_IMPL = "troups.tm.log.impl";
+
+  public static final String DEFAULT_TM_LOG_IMPL = "table";
+
+  public static final String TM_LOG_TABLE_NAME = "troups.tm.log.table.name";
 
   public static final String TM_LOG_TABLE_FAMILY_NAME = "troups.tm.log.table.family.name";
 
   public static final String DEFAULT_TM_LOG_TABLE_FAMILY_NAME = "log";
+
+  public static final String DEFAULT_TM_LOG_TABLE_NAME = "troups";
 
   public static final String TM_LOG_DISABLE_TRUNCATION = "troups.tm.log.disable.truncation";
 

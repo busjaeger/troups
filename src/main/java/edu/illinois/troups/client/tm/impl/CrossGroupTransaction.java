@@ -24,8 +24,8 @@ import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.XID;
-import edu.illinois.troups.tm.region.HKey;
-import edu.illinois.troups.tm.region.RTM;
+import edu.illinois.troups.tmg.CrossGroupTransactionManager;
+import edu.illinois.troups.tmg.impl.HKey;
 import edu.illinois.troups.tsm.SharedTimestampManager;
 import edu.illinois.troups.tsm.TimestampManager.TimestampListener;
 
@@ -67,8 +67,8 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
   }
 
   @Override
-  protected synchronized XID getTID(HTable table, byte[] row)
-      throws IOException {
+  protected synchronized XID getTID(HTable table, RowGroupPolicy policy,
+      byte[] row) throws IOException {
     switch (state) {
     case ACTIVE:
       break;
@@ -80,7 +80,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
     }
 
     // determine row group
-    RowGroupPolicy strategy = getStrategy(table);
+    RowGroupPolicy strategy = getPolicy(table, policy);
     if (strategy != null)
       row = strategy.getGroupKey(row);
     RowGroup group = new RowGroup(table, row);
@@ -88,7 +88,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
     // this is a new row group -> enlist RTM in transaction
     XID xid = groups.get(group);
     if (xid == null) {
-      xid = getRTM(group).join(id, new HKey(row));
+      xid = getRTM(group).join(new HKey(row), id);
       groups.put(group, xid);
       if (!stsm.addReferenceListener(xid.getTS(), xid.getPid(), this)) {
         rollback();
@@ -146,9 +146,10 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
   }
 
   private void onePhaseCommit() {
-    Entry<RowGroup, XID> group = groups.entrySet().iterator().next();
+    Entry<RowGroup, XID> first = groups.entrySet().iterator().next();
     try {
-      getRTM(group.getKey()).commit(group.getValue(), true);
+      RowGroup group = first.getKey();
+      getRTM(group).commit(group.getKey(), first.getValue(), true);
     } catch (IOException e) {
       throw new RuntimeException("Failed to commit", e);
     }
@@ -192,7 +193,8 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
         commitCalls.add(new Callable<RowGroup>() {
           @Override
           public RowGroup call() throws Exception {
-            getRTM(entry.getKey()).commit(entry.getValue(), false);
+            RowGroup group = entry.getKey();
+            getRTM(group).commit(group.getKey(), entry.getValue(), false);
             return entry.getKey();
           }
         });
@@ -251,7 +253,8 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
       prepareCalls.add(new Callable<Void>() {
         @Override
         public Void call() throws Exception {
-          getRTM(entry.getKey()).prepare(entry.getValue());
+          RowGroup group = entry.getKey();
+          getRTM(group).prepare(group.getKey(), entry.getValue());
           return null;
         }
       });
@@ -289,7 +292,8 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
       abortCalls.add(new Callable<Void>() {
         @Override
         public Void call() throws Exception {
-          getRTM(entry.getKey()).abort(entry.getValue());
+          RowGroup group = entry.getKey();
+          getRTM(group).abort(group.getKey(), entry.getValue());
           return null;
         }
       });
@@ -321,8 +325,10 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
     }
   }
 
-  protected RTM getRTM(RowGroup group) {
-    return group.getTable().coprocessorProxy(RTM.class, group.getRootRow());
+  @SuppressWarnings("unchecked")
+  protected CrossGroupTransactionManager<HKey> getRTM(RowGroup group) {
+    return group.getTable().coprocessorProxy(
+        CrossGroupTransactionManager.class, group.getKey().getRow());
   }
 
   private IllegalStateException newISA(String op) {
@@ -334,13 +340,16 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction,
     return id.getTS() + " (" + state + ") " + groups.toString();
   }
 
-  private RowGroupPolicy getStrategy(HTable table) throws IOException {
+  private RowGroupPolicy getPolicy(HTable table, RowGroupPolicy policy)
+      throws IOException {
     byte[] bName = table.getTableName();
     String name = Bytes.toString(bName);
     RowGroupPolicy strategy = strategies.get(name);
-    if (strategy == null)
-      strategies.put(name,
-          strategy = RowGroupSplitPolicy.getRowGroupStrategy(table));
+    if (strategy == null) {
+      if (policy == null)
+        policy = RowGroupSplitPolicy.getRowGroupStrategy(table);
+      strategies.put(name, strategy = policy);
+    }
     return strategy;
   }
 }

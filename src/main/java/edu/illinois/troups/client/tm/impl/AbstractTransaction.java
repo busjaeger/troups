@@ -10,21 +10,16 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.WritableUtils;
 
 import edu.illinois.troups.Constants;
+import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
 
 public abstract class AbstractTransaction implements Transaction {
 
   @Override
-  public Put enlistDelete(HTable table, byte[] row) throws IOException {
-    Put put = enlistPut(table, row);
-    put.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
-    return put;
-  }
-
-  @Override
-  public Get enlistGet(HTable table, byte[] row) throws IOException {
-    TID tid = getTID(table, row);
+  public Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException {
+    TID tid = getTID(table, policy, row);
     Get get = new Get(row);
     get.setTimeRange(0L, tid.getTS());
     setTID(get, tid);
@@ -32,10 +27,19 @@ public abstract class AbstractTransaction implements Transaction {
   }
 
   @Override
-  public Put enlistPut(HTable table, byte[] row) throws IOException {
-    TID tid = getTID(table, row);
+  public Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException {
+    TID tid = getTID(table, policy, row);
     Put put = new Put(row, tid.getTS());
     setTID(put, tid);
+    return put;
+  }
+
+  @Override
+  public Put enlistDelete(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException {
+    Put put = enlistPut(table, policy, row);
+    put.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     return put;
   }
 
@@ -44,7 +48,8 @@ public abstract class AbstractTransaction implements Transaction {
     operation.setAttribute(getTIDAttr(), tsBytes);
   }
 
-  protected abstract TID getTID(HTable table, byte[] row) throws IOException;
+  protected abstract TID getTID(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException;
 
   protected abstract String getTIDAttr();
 

@@ -20,13 +20,14 @@ import edu.illinois.troups.client.Put;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
-import edu.illinois.troups.tm.region.HRegionTransactionManager;
+import edu.illinois.troups.tmg.impl.HRegionTransactionManager;
 
 public class RandomRowTransactions {
 
   private static final byte[] tableName = toBytes("account");
   private static final byte[] familyName = toBytes("balance");
   private static final byte[] qualifierName = toBytes("main");
+  private static final String logFamily = "log";
 
   private final HBaseAdmin admin;
 
@@ -37,7 +38,9 @@ public class RandomRowTransactions {
   void start() throws Exception {
     HTableDescriptor desc = new HTableDescriptor(tableName);
     desc.addFamily(new HColumnDescriptor(familyName));
+    desc.addFamily(new HColumnDescriptor(logFamily));
     desc.addCoprocessor(HRegionTransactionManager.class.getName());
+//    desc.setValue(Constants.TM_LOG_FAMILY_NAME, logFamily);
     try {
       admin.createTable(desc);
     } catch (TableExistsException e) {
@@ -65,32 +68,42 @@ public class RandomRowTransactions {
     TransactionManager tm = TransactionManager.get(conf);
     Random rand = new Random();
 
-    long gett = 0, putt = 0, tt = 0;
+    long gett = 0, putt = 0, tt = 0, begint = 0, committ = 0;
     int num = 1000;
-    long before, beforeOp;
+    long now;
+    long before, beforeOp, beforeCommit;
     int abortCount = 0;
     long failureCount = 0;
     for (int i = 0; i < num; i++) {
       long rowID = rand.nextLong();
       byte[] row = Bytes.toBytes(rowID);
 
-      before = System.currentTimeMillis();
+      now = System.currentTimeMillis();
+      before = now;
       Transaction ta = tm.begin();
+      now = System.currentTimeMillis();
+      begint += (now - before);
       try {
-        beforeOp = System.currentTimeMillis();
+        beforeOp = now;
         Get get = new Get(row);
         get.addColumn(familyName, qualifierName);
         table.get(ta, get);
-        gett += (System.currentTimeMillis() - beforeOp);
+        now = System.currentTimeMillis();
+        gett += (now - beforeOp);
 
-        beforeOp = System.currentTimeMillis();
+        beforeOp = now;
         Put put = new Put(row);
         put.add(familyName, qualifierName, new byte[1024]);
         table.put(ta, put);
-        putt += (System.currentTimeMillis() - beforeOp);
+        now = System.currentTimeMillis();
+        putt += (now - beforeOp);
 
+        beforeCommit = now;
         ta.commit();
-        tt += (System.currentTimeMillis() - before);
+        now = System.currentTimeMillis();
+        committ += (now - beforeCommit);
+
+        tt += (now - before);
       } catch (TransactionAbortedException e) {
         abortCount++;
       } catch (Exception e) {
@@ -102,9 +115,12 @@ public class RandomRowTransactions {
       if (i % 100 == 0)
         System.out.println("100 times");
     }
+
     System.out.println("Average total: " + (tt / num));
     System.out.println("Average get: " + (gett / num));
     System.out.println("Average put: " + (putt / num));
+    System.out.println("Average begin: " + (begint / num));
+    System.out.println("Average commit: " + (committ / num));
     System.out.println("Count abort: " + abortCount);
     System.out.println("Count failure: " + failureCount);
   }
@@ -113,7 +129,7 @@ public class RandomRowTransactions {
       ZooKeeperConnectionException {
     Configuration conf = HBaseConfiguration.create();
     HBaseAdmin admin = new HBaseAdmin(conf);
-    RandomRow rr = new RandomRow(admin);
+    RandomRowTransactions rr = new RandomRowTransactions(admin);
     rr.start();
     try {
       rr.run();

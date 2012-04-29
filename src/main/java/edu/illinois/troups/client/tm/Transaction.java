@@ -13,11 +13,14 @@ import edu.illinois.troups.tm.TransactionAbortedException;
  */
 public interface Transaction {
 
-  Put enlistPut(HTable table, byte[] row) throws IOException;
+  Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException;
 
-  Get enlistGet(HTable table, byte[] row) throws IOException;
+  Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException;
 
-  Put enlistDelete(HTable table, byte[] row) throws IOException;
+  Put enlistDelete(HTable table, RowGroupPolicy policy, byte[] row)
+      throws IOException;
 
   void rollback();
 

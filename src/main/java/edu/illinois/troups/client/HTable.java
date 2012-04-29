@@ -6,24 +6,29 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
+import org.apache.hadoop.hbase.util.Bytes;
 
+import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 
 public class HTable implements Closeable {
 
   final org.apache.hadoop.hbase.client.HTable hTable;
+  final RowGroupPolicy groupPolicy;
 
   public HTable(Configuration conf, byte[] tableName) throws IOException {
     this.hTable = new org.apache.hadoop.hbase.client.HTable(conf, tableName);
+    this.groupPolicy = RowGroupSplitPolicy.getRowGroupStrategy(hTable);
   }
 
   public HTable(Configuration conf, String tableName) throws IOException {
-    this.hTable = new org.apache.hadoop.hbase.client.HTable(conf, tableName);
+    this(conf, Bytes.toBytes(tableName));
   }
 
   public Result get(Transaction ta, Get get) throws IOException {
-    org.apache.hadoop.hbase.client.Get hGet = ta
-        .enlistGet(hTable, get.getRow());
+    org.apache.hadoop.hbase.client.Get hGet = ta.enlistGet(hTable, groupPolicy,
+        get.getRow());
     for (Entry<byte[], ? extends Iterable<byte[]>> entry : get.getFamilyMap()
         .entrySet())
       for (byte[] column : entry.getValue())
@@ -34,8 +39,8 @@ public class HTable implements Closeable {
   }
 
   public void put(Transaction ta, Put put) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = ta
-        .enlistPut(hTable, put.getRow());
+    org.apache.hadoop.hbase.client.Put hPut = ta.enlistPut(hTable, groupPolicy,
+        put.getRow());
     for (List<KeyValue> kvl : put.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), kv.getValue());
@@ -51,7 +56,7 @@ public class HTable implements Closeable {
    */
   public void delete(Transaction ta, Delete delete) throws IOException {
     org.apache.hadoop.hbase.client.Put hPut = ta.enlistDelete(hTable,
-        delete.getRow());
+        groupPolicy, delete.getRow());
     for (List<KeyValue> kvl : delete.getFamilyMap().values())
       for (KeyValue kv : kvl)
         hPut.add(kv.getFamily(), kv.getQualifier(), null);

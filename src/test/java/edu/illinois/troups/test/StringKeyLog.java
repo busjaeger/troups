@@ -1,12 +1,14 @@
 package edu.illinois.troups.test;
 
 import java.io.IOException;
-import java.util.Collections;
+import java.util.NavigableMap;
+import java.util.TreeMap;
 
 import edu.illinois.troups.tm.TID;
-import edu.illinois.troups.tm.log.Log;
+import edu.illinois.troups.tm.TransactionLog;
 
-public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
+public class StringKeyLog implements
+    TransactionLog<StringKey, StringKeyLogRecord> {
 
   @Override
   public int compare(Long o1, Long o2) {
@@ -14,26 +16,23 @@ public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
   }
 
   @Override
-  public long appendStateTransition(TID tid, StringKey groupKey, int state)
+  public long appendStateTransition(TID tid, int state) throws IOException {
+    return 0;
+  }
+
+  @Override
+  public long appendGet(TID tid, StringKey key, long version)
       throws IOException {
     return 0;
   }
 
   @Override
-  public long appendGet(TID tid, StringKey groupKey, StringKey key, long version)
-      throws IOException {
+  public long appendPut(TID tid, StringKey key) throws IOException {
     return 0;
   }
 
   @Override
-  public long appendPut(TID tid, StringKey groupKey, StringKey key)
-      throws IOException {
-    return 0;
-  }
-
-  @Override
-  public long appendDelete(TID tid, StringKey groupKey, StringKey key)
-      throws IOException {
+  public long appendDelete(TID tid, StringKey key) throws IOException {
     return 0;
   }
 
@@ -42,8 +41,8 @@ public class StringKeyLog implements Log<StringKey, StringKeyLogRecord> {
   }
 
   @Override
-  public Iterable<StringKeyLogRecord> recover() throws IOException {
-    return Collections.emptyList();
+  public NavigableMap<Long, StringKeyLogRecord> open() throws IOException {
+    return new TreeMap<Long, StringKeyLogRecord>();
   }
 
 }

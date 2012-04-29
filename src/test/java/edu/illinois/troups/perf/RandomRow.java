@@ -57,21 +57,21 @@ public class RandomRow {
       long rowID = rand.nextLong();
       byte[] row = Bytes.toBytes(rowID);
 
-      before = System.currentTimeMillis();
+      before = System.nanoTime();
 
-      beforeOp = System.currentTimeMillis();
+      beforeOp = System.nanoTime();
       Get get = new Get(row);
       get.addColumn(familyName, qualifierName);
       table.get(get);
-      gett += (System.currentTimeMillis() - beforeOp);
+      gett += (System.nanoTime() - beforeOp);
 
-      beforeOp = System.currentTimeMillis();
+      beforeOp = System.nanoTime();
       Put put = new Put(row);
       put.add(familyName, qualifierName, new byte[1024]);
       table.put(put);
-      putt += (System.currentTimeMillis() - beforeOp);
+      putt += (System.nanoTime() - beforeOp);
 
-      tt += (System.currentTimeMillis() - before);
+      tt += (System.nanoTime() - before);
 
       if (i % 100 == 0)
         System.out.println("100 times");

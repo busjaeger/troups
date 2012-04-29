@@ -1,14 +1,9 @@
 package edu.illinois.troups.test;
 
 import edu.illinois.troups.tm.TID;
-import edu.illinois.troups.tm.log.LogRecord;
+import edu.illinois.troups.tm.TransactionLog.Record;
 
-public class StringKeyLogRecord implements LogRecord<StringKey> {
-
-  @Override
-  public long getSID() {
-    return 0;
-  }
+public class StringKeyLogRecord implements Record<StringKey> {
 
   @Override
   public TID getTID() {
@@ -20,8 +15,4 @@ public class StringKeyLogRecord implements LogRecord<StringKey> {
     return 0;
   }
 
-  @Override
-  public StringKey getGroupKey() {
-    return null;
-  }
 }
