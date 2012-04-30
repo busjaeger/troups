@@ -1,5 +1,13 @@
 package edu.illinois.troups.tsm.table;
 
+import static edu.illinois.troups.Constants.DEFAULT_TSS_TABLE_FAMILY_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_TABLE_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_TIMESTAMP_TIMEOUT;
+import static edu.illinois.troups.Constants.TSS_TABLE_FAMILY_NAME;
+import static edu.illinois.troups.Constants.TSS_TABLE_NAME;
+import static edu.illinois.troups.Constants.TSS_TIMESTAMP_TIMEOUT;
+import static org.apache.hadoop.hbase.util.Bytes.toBytes;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -9,7 +17,9 @@ import java.util.concurrent.ScheduledExecutorService;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
@@ -17,6 +27,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.DataOutputBuffer;
 
+import edu.illinois.troups.tm.region.HRegionTransactionManager;
 import edu.illinois.troups.tsm.NoSuchTimestampException;
 import edu.illinois.troups.tsm.NotOwnerException;
 import edu.illinois.troups.tsm.SharedTimestampManager;
@@ -29,6 +40,21 @@ public class HTableSharedTimestampManager extends HTableTimestampManager
 
   protected static byte[] referenceCounter = Bytes.toBytes("refcnt");
   protected static byte[] references = Bytes.toBytes("refs");
+
+  public static HTableSharedTimestampManager newInstance(
+      HConnection connection, ScheduledExecutorService pool) throws IOException {
+    Configuration conf = connection.getConfiguration();
+    byte[] tsTableName = toBytes(conf.get(TSS_TABLE_NAME,
+        DEFAULT_TSS_TABLE_NAME));
+    byte[] tsFamilyName = toBytes(conf.get(TSS_TABLE_FAMILY_NAME,
+        DEFAULT_TSS_TABLE_FAMILY_NAME));
+    HTable tsTable = HRegionTransactionManager.demandTable(connection, pool,
+        tsTableName, tsFamilyName);
+    long tsTimeout = conf.getLong(TSS_TIMESTAMP_TIMEOUT,
+        DEFAULT_TSS_TIMESTAMP_TIMEOUT);
+    return new HTableSharedTimestampManager(tsTable, tsFamilyName, pool,
+        tsTimeout);
+  }
 
   public HTableSharedTimestampManager(HTable tsTable, byte[] tsFamily,
       ScheduledExecutorService pool, long timestampTimeout) {

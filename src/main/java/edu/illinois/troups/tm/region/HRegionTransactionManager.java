@@ -5,9 +5,6 @@ import static edu.illinois.troups.Constants.DEFAULT_LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.DEFAULT_TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.DEFAULT_TRANSACTION_TIMEOUT;
 import static edu.illinois.troups.Constants.DEFAULT_TSS_IMPL;
-import static edu.illinois.troups.Constants.DEFAULT_TSS_TABLE_FAMILY_NAME;
-import static edu.illinois.troups.Constants.DEFAULT_TSS_TABLE_NAME;
-import static edu.illinois.troups.Constants.DEFAULT_TSS_TIMESTAMP_TIMEOUT;
 import static edu.illinois.troups.Constants.LOG_FAMILY_NAME;
 import static edu.illinois.troups.Constants.LOG_IMPL;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FAMILY;
@@ -20,9 +17,6 @@ import static edu.illinois.troups.Constants.TSS_IMPL;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_SERVER;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_TABLE;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_ZOOKEEPER;
-import static edu.illinois.troups.Constants.TSS_TABLE_FAMILY_NAME;
-import static edu.illinois.troups.Constants.TSS_TABLE_NAME;
-import static edu.illinois.troups.Constants.TSS_TIMESTAMP_TIMEOUT;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -91,8 +85,8 @@ import edu.illinois.troups.tm.region.log.HRegionLogStore;
 import edu.illinois.troups.tm.region.log.HSequenceFileLogStore;
 import edu.illinois.troups.tm.region.log.HTableLogStore;
 import edu.illinois.troups.tsm.SharedTimestampManager;
-import edu.illinois.troups.tsm.TimestampReclaimer;
 import edu.illinois.troups.tsm.TimestampManager.TimestampReclamationListener;
+import edu.illinois.troups.tsm.TimestampReclaimer;
 import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
 import edu.illinois.troups.tsm.table.HTableTimestampReclaimer;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
@@ -167,7 +161,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       return;
 
     region = env.getRegion();
-    groupPolicy = RowGroupSplitPolicy.getRowGroupStrategy(region);
+    groupPolicy = RowGroupSplitPolicy.newInstance(region);
 
     // create thread pool
     Configuration conf = env.getConfiguration();
@@ -190,15 +184,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       zkw = env.getRegionServerServices().getZooKeeper();
       HConnection connection = env.getRegionServerServices()
           .getCatalogTracker().getConnection();
-      byte[] tsTableName = toBytes(conf.get(TSS_TABLE_NAME,
-          DEFAULT_TSS_TABLE_NAME));
-      byte[] tsFamilyName = toBytes(conf.get(TSS_TABLE_FAMILY_NAME,
-          DEFAULT_TSS_TABLE_FAMILY_NAME));
-      HTable tsTable = demandTable(connection, pool, tsTableName, tsFamilyName);
-      long tsTimeout = conf.getLong(TSS_TIMESTAMP_TIMEOUT,
-          DEFAULT_TSS_TIMESTAMP_TIMEOUT);
-      tsm = new HTableSharedTimestampManager(tsTable, tsFamilyName, pool,
-          tsTimeout);
+      tsm = HTableSharedTimestampManager.newInstance(connection, pool);
       r = new HTableTimestampReclaimer((HTableSharedTimestampManager) tsm);
       collector = new TimestampReclaimer(r, conf, pool, zkw);
       break;
@@ -614,7 +600,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     return new HKey(groupPolicy == null ? row : groupPolicy.getGroupKey(row));
   }
 
-  private static HTable demandTable(HConnection connection,
+  public static HTable demandTable(HConnection connection,
       ExecutorService pool, byte[] tableName, byte[] familyName)
       throws IOException {
     Configuration conf = connection.getConfiguration();
@@ -629,6 +615,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         // ignore: concurrent creation
       }
     }
-    return new HTable(tableName, connection, pool);
+    return pool == null ? new HTable(conf, tableName) : new HTable(tableName,
+        connection, pool);
   }
 }

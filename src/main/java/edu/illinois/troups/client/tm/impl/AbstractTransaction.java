@@ -17,18 +17,21 @@ import edu.illinois.troups.tm.TID;
 public abstract class AbstractTransaction implements Transaction {
 
   @Override
-  public Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row)
-      throws IOException {
+  public Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row) {
     TID tid = getTID(table, policy, row);
     Get get = new Get(row);
-    get.setTimeRange(0L, tid.getTS());
+    try {
+      // TODO shouldn't set 0 here
+      get.setTimeRange(0L, tid.getTS());
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
     setTID(get, tid);
     return get;
   }
 
   @Override
-  public Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row)
-      throws IOException {
+  public Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row) {
     TID tid = getTID(table, policy, row);
     Put put = new Put(row, tid.getTS());
     setTID(put, tid);
@@ -36,8 +39,7 @@ public abstract class AbstractTransaction implements Transaction {
   }
 
   @Override
-  public Put enlistDelete(HTable table, RowGroupPolicy policy, byte[] row)
-      throws IOException {
+  public Put enlistDelete(HTable table, RowGroupPolicy policy, byte[] row) {
     Put put = enlistPut(table, policy, row);
     put.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     return put;
@@ -48,8 +50,7 @@ public abstract class AbstractTransaction implements Transaction {
     operation.setAttribute(getTIDAttr(), tsBytes);
   }
 
-  protected abstract TID getTID(HTable table, RowGroupPolicy policy, byte[] row)
-      throws IOException;
+  protected abstract TID getTID(HTable table, RowGroupPolicy policy, byte[] row);
 
   protected abstract String getTIDAttr();
 

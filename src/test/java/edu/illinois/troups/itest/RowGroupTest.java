@@ -75,8 +75,7 @@ public class RowGroupTest {
     // 2. set the row group split policy (used to figure out which rows are in
     // the same group)
     desc.setValue("SPLIT_POLICY", RowGroupSplitPolicy.class.getName());
-    desc.setValue(RowGroupPolicy.META_ATTR,
-        CharDelimiterSplitPolicy.class.getName());
+    RowGroupPolicy.setRowGroupPolicy(desc, CharDelimiterSplitPolicy.class);
 
     // 3. configure the transaction manager coprocessor
     desc.addCoprocessor(HRegionTransactionManager.class.getName());

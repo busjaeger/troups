@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map.Entry;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.troups.client.tm.RowGroupPolicy;
@@ -19,7 +18,7 @@ public class HTable implements Closeable {
 
   public HTable(Configuration conf, byte[] tableName) throws IOException {
     this.hTable = new org.apache.hadoop.hbase.client.HTable(conf, tableName);
-    this.groupPolicy = RowGroupSplitPolicy.getRowGroupStrategy(hTable);
+    this.groupPolicy = RowGroupPolicy.newInstance(hTable);
   }
 
   public HTable(Configuration conf, String tableName) throws IOException {

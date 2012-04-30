@@ -3,7 +3,6 @@ package edu.illinois.troups.client.tm.impl;
 import java.io.IOException;
 
 import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 
 import edu.illinois.troups.Constants;
 import edu.illinois.troups.client.tm.RowGroupPolicy;
@@ -26,19 +25,22 @@ public class GroupTransaction extends AbstractTransaction implements
   }
 
   @Override
-  public TID getTID(HTable table, RowGroupPolicy policy, byte[] row)
-      throws IOException {
+  public TID getTID(HTable table, RowGroupPolicy policy, byte[] row) {
     if (completed)
       throw new IllegalStateException("Already completed");
 
     // if this is the first enlist -> begin transaction
     if (this.group == null) {
       if (policy == null)
-        policy = RowGroupSplitPolicy.getRowGroupStrategy(table);
+        policy = RowGroupPolicy.newInstance(table);
       if (policy != null)
         row = policy.getGroupKey(row);
       RowGroup group = new RowGroup(table, row);
-      this.id = getTM(group).begin(group.getKey());
+      try {
+        this.id = getTM(group).begin(group.getKey());
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
       this.groupPolicy = policy;
       this.group = group;
     }

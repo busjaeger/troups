@@ -5,7 +5,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.troups.client.tm.RowGroupPolicy;
 
-public class CharDelimiterSplitPolicy implements RowGroupPolicy {
+public class CharDelimiterSplitPolicy extends RowGroupPolicy {
 
   private final char delimiter;
 

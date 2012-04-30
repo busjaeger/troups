@@ -1,7 +1,11 @@
 package edu.illinois.troups.client.tm.impl;
 
-import static edu.illinois.troups.Constants.DEFAULT_CLIENT_THREAD_COUNT;
 import static edu.illinois.troups.Constants.CLIENT_THREAD_COUNT;
+import static edu.illinois.troups.Constants.DEFAULT_CLIENT_THREAD_COUNT;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_IMPL;
+import static edu.illinois.troups.Constants.TSS_IMPL;
+import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_TABLE;
+import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_ZOOKEEPER;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -16,6 +20,7 @@ import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tsm.SharedTimestampManager;
+import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
 
 public class TransactionManagerClient extends TransactionManager {
@@ -27,7 +32,17 @@ public class TransactionManagerClient extends TransactionManager {
     HConnection connection = HConnectionManager.getConnection(conf);
     @SuppressWarnings("deprecation")
     ZooKeeperWatcher zkw = connection.getZooKeeperWatcher();
-    this.stsm = new ZKSharedTimestampManager(zkw);
+    int tssImpl = conf.getInt(TSS_IMPL, DEFAULT_TSS_IMPL);
+    switch (tssImpl) {
+    case TSS_IMPL_VALUE_ZOOKEEPER:
+      this.stsm = new ZKSharedTimestampManager(zkw);
+      break;
+    case TSS_IMPL_VALUE_TABLE:
+      this.stsm = HTableSharedTimestampManager.newInstance(connection, null);
+      break;
+    default:
+      throw new IllegalStateException("Unknown TSS implementation " + tssImpl);
+    }
     int numThreads = conf.getInt(CLIENT_THREAD_COUNT,
         DEFAULT_CLIENT_THREAD_COUNT);
     this.pool = Executors.newFixedThreadPool(numThreads);

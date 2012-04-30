@@ -12,7 +12,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.regionserver.RowGroupSplitPolicy;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import com.google.common.base.Function;
@@ -41,7 +40,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
   // mutable state
   private TID id;
   private final Map<RowGroup, XID> groups = new HashMap<RowGroup, XID>();
-  private final Map<String, RowGroupPolicy> strategies = new HashMap<String, RowGroupPolicy>();
+  private final Map<String, RowGroupPolicy> policies = new HashMap<String, RowGroupPolicy>();
   private State state;
 
   CrossGroupTransaction(SharedTimestampManager tsm, ExecutorService pool) {
@@ -66,7 +65,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
 
   @Override
   protected synchronized XID getTID(HTable table, RowGroupPolicy policy,
-      byte[] row) throws IOException {
+      byte[] row) {
     switch (state) {
     case ACTIVE:
       break;
@@ -86,7 +85,12 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
     // this is a new row group -> enlist RTM in transaction
     XID xid = groups.get(group);
     if (xid == null) {
-      xid = getRTM(group).join(new HKey(row), id);
+      try {
+        xid = getRTM(group).join(new HKey(row), id);
+      } catch (IOException e) {
+        rollback();
+        throw new RuntimeException(e);
+      }
       groups.put(group, xid);
     }
     return xid;
@@ -295,7 +299,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
 
     // clean up timestamp (not necessary, but improves performance)
     try {
-      stsm.release(id.getTS());
+      stsm.releaseShared(id.getTS());
     } catch (IOException e) {
       e.printStackTrace(System.out);
     }
@@ -316,15 +320,14 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
     return id.getTS() + " (" + state + ") " + groups.toString();
   }
 
-  private RowGroupPolicy getPolicy(HTable table, RowGroupPolicy policy)
-      throws IOException {
+  private RowGroupPolicy getPolicy(HTable table, RowGroupPolicy policy) {
     byte[] bName = table.getTableName();
     String name = Bytes.toString(bName);
-    RowGroupPolicy strategy = strategies.get(name);
+    RowGroupPolicy strategy = policies.get(name);
     if (strategy == null) {
       if (policy == null)
-        policy = RowGroupSplitPolicy.getRowGroupStrategy(table);
-      strategies.put(name, strategy = policy);
+        policy = RowGroupPolicy.newInstance(table);
+      policies.put(name, strategy = policy);
     }
     return strategy;
   }

@@ -76,8 +76,11 @@ public class HTableTimestampManager implements TimestampManager {
   public boolean release(long ts) throws IOException {
     Put put = new Put(timestampRow, ts);
     put.add(tsFamily, releasedColumn, released);
-    return tsTable.checkAndPut(timestampRow, tsFamily, releasedColumn,
+    boolean released =tsTable.checkAndPut(timestampRow, tsFamily, releasedColumn,
         notReleased, put);
+    if (!released)
+      LOG.warn("Failed to release timestamp "+ts);
+    return released;
   }
 
   @Override
@@ -99,6 +102,8 @@ public class HTableTimestampManager implements TimestampManager {
   @Override
   public void addTimestampReclamationListener(
       TimestampReclamationListener listener) {
+    if (pool == null)
+      throw new IllegalStateException("No pool configured");
     synchronized (listeners) {
       if (listeners.isEmpty()) {
         try {
