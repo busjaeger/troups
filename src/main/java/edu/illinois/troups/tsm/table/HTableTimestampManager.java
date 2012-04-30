@@ -1,6 +1,7 @@
 package edu.illinois.troups.tsm.table;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
@@ -20,7 +21,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.troups.tsm.TimestampManager;
 
-public class HTableTimestampManager implements TimestampManager {
+public class HTableTimestampManager implements TimestampManager, Runnable {
 
   private static final Log LOG = LogFactory
       .getLog(HTableTimestampManager.class);
@@ -60,7 +61,7 @@ public class HTableTimestampManager implements TimestampManager {
     HTableInterface tsTable = tablePool.getTable(tableName);
     try {
       long ts = tsTable.incrementColumnValue(counterRow, tsFamily, timeColumn,
-          1);
+          1L);
       byte[] row = Bytes.toBytes(ts);
       Put put = new Put(row, ts);
       put.add(tsFamily, releasedColumn, notReleased);
@@ -170,18 +171,70 @@ public class HTableTimestampManager implements TimestampManager {
     }
   }
 
-  // internal
-  ResultScanner getTimestamps() throws IOException {
+  // reclamation
+  @Override
+  public void run() {
+    long before = System.currentTimeMillis();
     HTableInterface tsTable = tablePool.getTable(tableName);
     try {
+      ArrayList<byte[]> reclaimables = new ArrayList<byte[]>();
       Scan scan = new Scan();
-      scan.setStartRow(Bytes.toBytes(Long.MIN_VALUE));
-      scan.setStopRow(Bytes.toBytes(Long.MAX_VALUE));
-      scan.addFamily(tsFamily);
-      return tsTable.getScanner(scan);
+      ResultScanner scanner;
+      try {
+        scanner = tsTable.getScanner(scan);
+      } catch (IOException e) {
+        LOG.error("Failed to create Scanner", e);
+        e.printStackTrace(System.out);
+        return;
+      }
+      try {
+        for (Result result : scanner) {
+          // filter counter rows
+          if (result.getValue(tsFamily, releasedColumn) == null) {
+            byte[] row = result.getRow();
+            if (Bytes.equals(row, counterRow)
+                || Bytes.equals(row, lastReclaimedRow))
+              continue;
+            LOG.error("row without released column " + result.getRow());
+            return;
+          }
+          if (isReclaimable(result))
+            reclaimables.add(result.getRow());
+          else
+            break;
+        }
+      } finally {
+        scanner.close();
+      }
+
+      if (!reclaimables.isEmpty()) {
+        byte[] last = reclaimables.get(reclaimables.size() - 1);
+        long reclaimed = Bytes.toLong(last);
+        try {
+          setLastReclaimedTimestamp(reclaimed);
+        } catch (IOException e) {
+          LOG.error("Failed to set last reclaimed", e);
+          e.printStackTrace(System.out);
+        }
+        for (byte[] timestamp : reclaimables) {
+          try {
+            deleteTimestamp(timestamp);
+          } catch (IOException e) {
+            LOG.error("Failed to delete reclaimed timestamps", e);
+            e.printStackTrace(System.out);
+          }
+        }
+      }
+
     } finally {
-      tsTable.close();
+      try {
+        tsTable.close();
+      } catch (IOException e) {
+        LOG.error("failed to close table", e);
+      }
     }
+    LOG.info("Timestamp collection took: "
+        + (System.currentTimeMillis() - before));
   }
 
   boolean isReclaimable(Result timestamp) {
@@ -199,11 +252,10 @@ public class HTableTimestampManager implements TimestampManager {
     return false;
   }
 
-  void deleteTimestamp(Result timestamp) throws IOException {
+  void deleteTimestamp(byte[] row) throws IOException {
     HTableInterface tsTable = tablePool.getTable(tableName);
     try {
-      Delete delete = new Delete(timestamp.getRow());
-      delete.deleteFamily(tsFamily);
+      Delete delete = new Delete(row);
       tsTable.delete(delete);
     } finally {
       tsTable.close();

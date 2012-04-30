@@ -33,7 +33,7 @@ public interface Constants {
 
   public static final String TSS_COLLECTOR_INTERVAL = "troups.tss.collector.interval";
 
-  public static final long DEFAULT_TSS_COLLECTOR_INTERVAL = SECONDS.toMicros(5);
+  public static final long DEFAULT_TSS_COLLECTOR_INTERVAL = SECONDS.toMillis(5);
 
   // Timestamp service htable properties
 

@@ -87,7 +87,6 @@ import edu.illinois.troups.tsm.SharedTimestampManager;
 import edu.illinois.troups.tsm.TimestampManager.TimestampReclamationListener;
 import edu.illinois.troups.tsm.TimestampReclaimer;
 import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
-import edu.illinois.troups.tsm.table.HTableTimestampReclaimer;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKTimestampReclaimer;
 
@@ -204,8 +203,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     case TSS_IMPL_VALUE_TABLE:
       zkw = env.getRegionServerServices().getZooKeeper();
       tsm = HTableSharedTimestampManager.newInstance(conf, tablePool, pool);
-      r = new HTableTimestampReclaimer((HTableSharedTimestampManager) tsm);
-      collector = new TimestampReclaimer(r, conf, pool, zkw);
+      collector = new TimestampReclaimer((Runnable) tsm, conf, pool, zkw);
       break;
     case TSS_IMPL_VALUE_SERVER:
       // TODO

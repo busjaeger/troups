@@ -24,7 +24,7 @@ public class HTableTimestampReclaimer implements Runnable {
   public void run() {
     long before = System.currentTimeMillis();
 
-    ResultScanner timestamps;
+    Iterable<Result> timestamps;
     try {
       timestamps = tsm.getTimestamps();
     } catch (IOException e) {
