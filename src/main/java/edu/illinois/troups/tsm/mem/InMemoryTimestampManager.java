@@ -93,7 +93,7 @@ public class InMemoryTimestampManager implements TimestampManager {
     return !isReleased(ts);
   }
 
-  @Override
+  // @Override
   public boolean isReleased(long ts) throws IOException {
     return !timestamps.containsKey(ts);
   }

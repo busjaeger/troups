@@ -5,8 +5,14 @@ import static edu.illinois.troups.Constants.DEFAULT_LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.DEFAULT_TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.DEFAULT_TRANSACTION_TIMEOUT;
 import static edu.illinois.troups.Constants.DEFAULT_TSS_IMPL;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_TABLE_FAMILY_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_TABLE_NAME;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_TIMESTAMP_TIMEOUT;
 import static edu.illinois.troups.Constants.LOG_FAMILY_NAME;
 import static edu.illinois.troups.Constants.LOG_IMPL;
+import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FAMILY;
+import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FILE;
+import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_TABLE;
 import static edu.illinois.troups.Constants.LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.TRANSACTION_TIMEOUT;
@@ -14,6 +20,9 @@ import static edu.illinois.troups.Constants.TSS_IMPL;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_SERVER;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_TABLE;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_ZOOKEEPER;
+import static edu.illinois.troups.Constants.TSS_TABLE_FAMILY_NAME;
+import static edu.illinois.troups.Constants.TSS_TABLE_NAME;
+import static edu.illinois.troups.Constants.TSS_TIMESTAMP_TIMEOUT;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -81,8 +90,13 @@ import edu.illinois.troups.tm.region.log.HRecord;
 import edu.illinois.troups.tm.region.log.HRegionLogStore;
 import edu.illinois.troups.tm.region.log.HSequenceFileLogStore;
 import edu.illinois.troups.tm.region.log.HTableLogStore;
+import edu.illinois.troups.tsm.SharedTimestampManager;
+import edu.illinois.troups.tsm.TimestampReclaimer;
 import edu.illinois.troups.tsm.TimestampManager.TimestampReclamationListener;
+import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
+import edu.illinois.troups.tsm.table.HTableTimestampReclaimer;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
+import edu.illinois.troups.tsm.zk.ZKTimestampReclaimer;
 
 public class HRegionTransactionManager extends BaseRegionObserver implements
     GroupTransactionManager<HKey>, CrossGroupTransactionManager<HKey>,
@@ -101,7 +115,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private ScheduledExecutorService pool;
   private long transactionTimeout;
 
-  private ZKSharedTimestampManager tsm;
+  private SharedTimestampManager tsm;
 
   private TimestampReclaimer collector;
   private volatile long lrt;
@@ -134,7 +148,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (tm == null) {
       XATransactionLog<HKey, HRecord> logWrapper = new HCrossGroupTransactionLog(
           groupKey, logStore);
-      tm = new MVTOXATransactionManager<HKey, HRecord>(this, logWrapper, tsm);
+      tm = new MVTOXATransactionManager<HKey, HRecord>(this, logWrapper, tsm,
+          pool);
       MVTOXATransactionManager<HKey, HRecord> existing = tms.putIfAbsent(
           groupKey, tm);
       if (existing != null)
@@ -168,36 +183,54 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     case TSS_IMPL_VALUE_ZOOKEEPER:
       ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
       tsm = new ZKSharedTimestampManager(zkw);
-      collector = new TimestampReclaimer(tsm, conf, pool, zkw);
+      Runnable r = new ZKTimestampReclaimer((ZKSharedTimestampManager) tsm);
+      collector = new TimestampReclaimer(r, conf, pool, zkw);
       break;
     case TSS_IMPL_VALUE_TABLE:
-      // TODO
-      throw new UnsupportedOperationException(
-          "currently don't support table-based TSS");
+      zkw = env.getRegionServerServices().getZooKeeper();
+      HConnection connection = env.getRegionServerServices()
+          .getCatalogTracker().getConnection();
+      byte[] tsTableName = toBytes(conf.get(TSS_TABLE_NAME,
+          DEFAULT_TSS_TABLE_NAME));
+      byte[] tsFamilyName = toBytes(conf.get(TSS_TABLE_FAMILY_NAME,
+          DEFAULT_TSS_TABLE_FAMILY_NAME));
+      HTable tsTable = demandTable(connection, pool, tsTableName, tsFamilyName);
+      long tsTimeout = conf.getLong(TSS_TIMESTAMP_TIMEOUT,
+          DEFAULT_TSS_TIMESTAMP_TIMEOUT);
+      tsm = new HTableSharedTimestampManager(tsTable, tsFamilyName, pool,
+          tsTimeout);
+      r = new HTableTimestampReclaimer((HTableSharedTimestampManager) tsm);
+      collector = new TimestampReclaimer(r, conf, pool, zkw);
+      break;
     case TSS_IMPL_VALUE_SERVER:
       // TODO
       throw new UnsupportedOperationException(
-          "currently don't support table-based TSS");
+          "currently don't support server TSS");
     }
 
     // create a log store
     int logImpl = conf.getInt(LOG_IMPL, DEFAULT_LOG_IMPL);
     switch (logImpl) {
-    case Constants.LOG_IMPL_VALUE_TABLE:
+    case LOG_IMPL_VALUE_TABLE:
+      HConnection connection = env.getRegionServerServices()
+          .getCatalogTracker().getConnection();
+      byte[] logTableName = toBytes(conf.get(LOG_TABLE_NAME,
+          DEFAULT_LOG_TABLE_NAME));
+      byte[] logFamilyName = toBytes(conf.get(LOG_TABLE_NAME,
+          DEFAULT_LOG_TABLE_NAME));
+      HTable logTable = demandTable(connection, pool, logTableName,
+          logFamilyName);
+      byte[] tableName = region.getTableDesc().getName();
+      logStore = new HTableLogStore(logTable, logFamilyName, tableName);
+      break;
+    case LOG_IMPL_VALUE_FILE:
       FileSystem fs = region.getFilesystem();
       Path groupsDir = new Path(region.getRegionDir().getParent(), "groups");
       if (!fs.exists(groupsDir))
         fs.mkdirs(groupsDir);
       logStore = new HSequenceFileLogStore(fs, groupsDir);
       break;
-    case Constants.LOG_IMPL_VALUE_FILE:
-      HConnection connection = env.getRegionServerServices()
-          .getCatalogTracker().getConnection();
-      HTable logTable = demandLogTable(connection, pool);
-      byte[] tableName = region.getTableDesc().getName();
-      logStore = new HTableLogStore(logTable, tableName);
-      break;
-    case Constants.LOG_IMPL_VALUE_FAMILY:
+    case LOG_IMPL_VALUE_FAMILY:
       String logFamily = region.getTableDesc().getValue(LOG_FAMILY_NAME);
       if (logFamily == null)
         logFamily = Constants.DEFAULT_LOG_FAMILY_NAME;
@@ -245,9 +278,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
     for (MVTOXATransactionManager<HKey, HRecord> tm : tms.values())
       tm.stop();
-
-    // TODO graceful shutdown
-    pool.shutdown();
   }
 
   @Override
@@ -255,7 +285,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       boolean abortRequested) {
     for (MVTOXATransactionManager<HKey, HRecord> tm : tms.values())
       tm.stopped();
-    super.postClose(e, abortRequested);
+    pool.shutdown();
   }
 
   long average(long time, long num) {
@@ -584,12 +614,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     return new HKey(groupPolicy == null ? row : groupPolicy.getGroupKey(row));
   }
 
-  private static HTable demandLogTable(HConnection connection,
-      ExecutorService pool) throws IOException {
+  private static HTable demandTable(HConnection connection,
+      ExecutorService pool, byte[] tableName, byte[] familyName)
+      throws IOException {
     Configuration conf = connection.getConfiguration();
-    byte[] tableName = toBytes(conf.get(LOG_TABLE_NAME, DEFAULT_LOG_TABLE_NAME));
-    byte[] familyName = toBytes(conf
-        .get(LOG_TABLE_NAME, DEFAULT_LOG_TABLE_NAME));
     // create log table if necessary
     HBaseAdmin admin = new HBaseAdmin(conf);
     if (!admin.tableExists(tableName)) {

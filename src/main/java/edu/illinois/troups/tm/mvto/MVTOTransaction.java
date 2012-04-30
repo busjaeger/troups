@@ -88,17 +88,13 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     waitForReadFrom();
     getTransactionLog().appendStateTransition(id, COMMITTED);
     setCommitted();
-    try {
-      finalizeCommit();
-    } catch (Throwable t) {
-      // will retry later: commit itself was OK
-      LOG.error("Failed to finalize transaction " + this + " error: " + t);
-    }
+    tm.scheduleFinalize(id);
   }
 
   protected boolean shouldCommit() {
     switch (state) {
     case COMMITTED:
+    case FINALIZED:
       return false;
     case STARTED:
       return true;
@@ -120,12 +116,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     if (state == BLOCKED)
       notify();
     setAborted();
-    try {
-      finalizeAbort();
-    } catch (Throwable t) {
-      // will retry later: commit itself was OK
-      LOG.error("Failed to finalize transaction " + this + " error: " + t);
-    }
+    tm.scheduleFinalize(id);
   }
 
   protected boolean shouldAbort() {
@@ -134,6 +125,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     case BLOCKED:
       return true;
     case ABORTED:
+    case FINALIZED:
       return false;
     default:
       throw newISA("abort");
@@ -148,12 +140,18 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     removeReads();
   }
 
-  public synchronized void timeout(long current, long timeout)
-      throws IOException {
-    if (isRunning() && (current - lastTouched) < timeout)
+  public synchronized void timeout(long timeout) throws IOException {
+    long current = System.currentTimeMillis();
+    if (isRunning() && current > lastTouched
+        && (lastTouched + timeout) < current) {
+      LOG.warn("Aborting transaction " + this + " lastTouched " + lastTouched
+          + " at " + current);
       abort();
+    }
   }
 
+  // it is actually necessary to finalize on a separate thread, because we are
+  // calling back into the region
   public final synchronized void finalize() throws IOException {
     if (!shouldFinalize())
       return;
@@ -184,7 +182,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
    * and permanently remove deleted cells. This could be done on a separate
    * thread, since it is decoupled from the commit operation.
    */
-  protected void finalizeCommit() throws IOException {
+  private synchronized void finalizeCommit() throws IOException {
+    if (!shouldFinalize())
+      return;
+
     /*
      * notify transactions that read from this one, that it committed (so they
      * don't wait on it): this has to be done after commit, since we don't want
@@ -215,7 +216,10 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     tm.addActiveReader(this);
   }
 
-  protected void finalizeAbort() throws IOException {
+  private synchronized void finalizeAbort() throws IOException {
+    if (!shouldFinalize())
+      return;
+
     // cascade abort to transactions that read from this one
     for (Iterator<MVTOTransaction<K>> it = readBy.iterator(); it.hasNext();) {
       MVTOTransaction<K> readBy = it.next();
@@ -461,7 +465,7 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   protected void checkRunning() {
     if (!isRunning())
-      throw newISA("read");
+      throw newISA("access");
   }
 
   protected boolean isRunning() {

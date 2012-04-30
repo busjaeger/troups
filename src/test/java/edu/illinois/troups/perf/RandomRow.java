@@ -36,7 +36,7 @@ public class RandomRow {
     try {
       admin.createTable(desc);
     } catch (TableExistsException e) {
-      e.printStackTrace();
+      e.printStackTrace(System.out);
       // ignore
     }
   }

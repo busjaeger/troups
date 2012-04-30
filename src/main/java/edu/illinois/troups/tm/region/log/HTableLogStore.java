@@ -1,9 +1,5 @@
 package edu.illinois.troups.tm.region.log;
 
-import static edu.illinois.troups.Constants.DEFAULT_LOG_TABLE_NAME;
-import static edu.illinois.troups.Constants.LOG_TABLE_NAME;
-import static org.apache.hadoop.hbase.util.Bytes.toBytes;
-
 import java.io.IOException;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -22,11 +18,10 @@ public class HTableLogStore implements GroupLogStore {
   private final byte[] tableName;
   private final byte[] familyName;
 
-  public HTableLogStore(HTable logTable, byte[] tableName) {
+  public HTableLogStore(HTable logTable, byte[] logFamilyName, byte[] tableName) {
     this.logTable = logTable;
     this.tableName = tableName;
-    this.familyName = toBytes(logTable.getConfiguration().get(
-        LOG_TABLE_NAME, DEFAULT_LOG_TABLE_NAME));
+    this.familyName = logFamilyName;
   }
 
   @Override

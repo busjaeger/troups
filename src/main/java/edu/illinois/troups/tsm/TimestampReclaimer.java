@@ -1,9 +1,9 @@
-package edu.illinois.troups.tm.region;
+package edu.illinois.troups.tsm;
 
-import static edu.illinois.troups.Constants.DEFAULT_TSS_ZOOKEEPER_COLLECTOR_INTERVAL;
+import static edu.illinois.troups.Constants.DEFAULT_TSS_COLLECTOR_INTERVAL;
 import static edu.illinois.troups.Constants.DEFAULT_ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.troups.Constants.DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
-import static edu.illinois.troups.Constants.TSS_ZOOKEEPER_COLLECTOR_INTERVAL;
+import static edu.illinois.troups.Constants.TSS_COLLECTOR_INTERVAL;
 import static edu.illinois.troups.Constants.ZOOKEEPER_ZNODE_BASE;
 import static edu.illinois.troups.Constants.ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS;
 import static edu.illinois.troups.tsm.zk.Util.createWithParents;
@@ -11,8 +11,6 @@ import static edu.illinois.troups.tsm.zk.Util.join;
 import static edu.illinois.troups.tsm.zk.Util.setWatch;
 import static edu.illinois.troups.tsm.zk.Util.toDir;
 
-import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -25,32 +23,27 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
-import edu.illinois.troups.tsm.NoSuchTimestampException;
-import edu.illinois.troups.tsm.ReclaimableTimestampManager;
-
 public class TimestampReclaimer implements Runnable {
 
-  private final ReclaimableTimestampManager tsm;
+  private final Runnable reclaimer;
   private final ZooKeeperWatcher zkw;
   private final ScheduledExecutorService pool;
   private final long interval;
   private final String collectorsNode;
 
   private String zNode;
-  private Long lastReclaimed;
-  private long lastSeen;
 
-  public TimestampReclaimer(ReclaimableTimestampManager tsm,
-      Configuration conf, ScheduledExecutorService pool, ZooKeeperWatcher zkw) {
-    this.tsm = tsm;
+  public TimestampReclaimer(Runnable reclaimer, Configuration conf,
+      ScheduledExecutorService pool, ZooKeeperWatcher zkw) {
+    this.reclaimer = reclaimer;
     this.zkw = zkw;
     this.pool = pool;
     String base = conf.get(ZOOKEEPER_ZNODE_BASE, DEFAULT_ZOOKEEPER_ZNODE_BASE);
     String collectors = conf.get(ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS,
         DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS);
     this.collectorsNode = join(zkw.baseZNode, base, collectors);
-    this.interval = conf.getLong(TSS_ZOOKEEPER_COLLECTOR_INTERVAL,
-        DEFAULT_TSS_ZOOKEEPER_COLLECTOR_INTERVAL);
+    this.interval = conf.getLong(TSS_COLLECTOR_INTERVAL,
+        DEFAULT_TSS_COLLECTOR_INTERVAL);
   }
 
   public void start() {
@@ -94,7 +87,7 @@ public class TimestampReclaimer implements Runnable {
             try {
               tryToBecomeCollector();
             } catch (Exception e) {
-              e.printStackTrace();
+              e.printStackTrace(System.out);
             }
             break;
           default:
@@ -109,53 +102,7 @@ public class TimestampReclaimer implements Runnable {
 
   @Override
   public void run() {
-    try {
-      if (lastReclaimed == null) {
-        lastReclaimed = tsm.getLastReclaimedTimestamp();
-        lastSeen = lastReclaimed;
-      }
-
-      long newLastReclaimed = lastReclaimed;
-      List<Long> deletes = new ArrayList<Long>();
-      List<Long> timestamps = tsm.getTimestamps();
-
-      if (timestamps.isEmpty()) {
-        // with 'lastSeen' we are not guaranteed to always clean up transactions
-        // right away, but we will eventually and it performs well
-        newLastReclaimed = lastSeen;
-      } else {
-        long last = timestamps.get(timestamps.size() - 1);
-        if (last > lastSeen)
-          lastSeen = last;
-        for (long ts : timestamps) {
-          // time-stamps that we failed to delete before
-          if (ts < lastReclaimed) {
-            deletes.add(ts);
-          }
-          // time-stamps after current lrt: check if still needed
-          else if (ts >= lastReclaimed) {
-            if (!tsm.isReleased(ts)) {
-              lastReclaimed = ts - 1;
-              break;
-            }
-            deletes.add(ts);
-          }
-        }
-      }
-      if (newLastReclaimed != lastReclaimed) {
-        tsm.setLastReclaimedTimestamp(newLastReclaimed);
-        lastReclaimed = newLastReclaimed;
-      }
-
-      for (Long delete : deletes)
-        try {
-          tsm.release(delete);
-        } catch (NoSuchTimestampException e) {
-          // ignore
-        }
-    } catch (IOException e) {
-      e.printStackTrace();
-    }
+    reclaimer.run();
   }
 
 }

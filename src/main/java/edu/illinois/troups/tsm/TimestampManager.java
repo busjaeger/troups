@@ -47,8 +47,8 @@ public interface TimestampManager extends Comparator<Long> {
   // */
   // boolean isHeldByCaller(long ts) throws NoSuchTimestampException,
   // IOException;
-
-  boolean isReleased(long ts) throws IOException;
+//
+//  boolean isReleased(long ts) throws IOException;
 
   // /**
   // *

@@ -15,6 +15,8 @@ public interface SharedTimestampManager extends TimestampManager {
    */
   long acquireShared() throws IOException;
 
+  boolean releaseShared(long ts) throws IOException;
+  
   /**
    * Creates a new reference and returns the unique identifier of the reference
    * 

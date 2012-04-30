@@ -133,9 +133,9 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
 
     // clean up timestamp (not necessary, but improves performance)
     try {
-      stsm.release(id.getTS());
+      stsm.releaseShared(id.getTS());
     } catch (IOException e) {
-      e.printStackTrace();
+      e.printStackTrace(System.out);
     }
   }
 
@@ -215,7 +215,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
             }
           }
         } catch (ExecutionException e) {
-          e.printStackTrace();
+          e.printStackTrace(System.out);
         }
       }
     }
@@ -251,10 +251,10 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
         future.get();
       } catch (InterruptedException e) {
         Thread.interrupted();
-        e.printStackTrace();
+        e.printStackTrace(System.out);
         error = e;
       } catch (ExecutionException e) {
-        e.printStackTrace();
+        e.printStackTrace(System.out);
         error = e.getCause();
       }
     }
@@ -289,7 +289,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
         } catch (InterruptedException e) {
           Thread.interrupted();
         } catch (ExecutionException e) {
-          e.printStackTrace();
+          e.printStackTrace(System.out);
         }
       }
 
@@ -297,7 +297,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
     try {
       stsm.release(id.getTS());
     } catch (IOException e) {
-      e.printStackTrace();
+      e.printStackTrace(System.out);
     }
   }
 

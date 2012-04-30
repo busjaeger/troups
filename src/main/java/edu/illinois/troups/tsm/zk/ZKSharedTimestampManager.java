@@ -68,7 +68,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
 
   // override to delete recursively
   @Override
-  public boolean release(long ts) throws IOException {
+  public boolean releaseShared(long ts) throws IOException {
     String tsNode = join(timestampsNode, ts);
     try {
       try {
@@ -134,7 +134,7 @@ public class ZKSharedTimestampManager extends ZKTimestampManager implements
             if (!isPersistent(ts))
               listener.released(ts);
           } catch (IOException e) {
-            e.printStackTrace();
+            e.printStackTrace(System.out);
             // ignore
           }
         default:

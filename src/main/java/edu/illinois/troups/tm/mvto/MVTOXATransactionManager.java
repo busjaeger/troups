@@ -5,6 +5,7 @@ import static edu.illinois.troups.tm.XATransactionState.PREPARED;
 import static edu.illinois.troups.tm.log.XATransactionLog.RECORD_TYPE_XA_STATE_TRANSITION;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -27,8 +28,9 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
       .getLog(MVTOXATransactionManager.class);
 
   public MVTOXATransactionManager(KeyValueStore<K> keyValueStore,
-      XATransactionLog<K, R> log, SharedTimestampManager timestampManager) {
-    super(keyValueStore, log, timestampManager);
+      XATransactionLog<K, R> log, SharedTimestampManager timestampManager,
+      ExecutorService pool) {
+    super(keyValueStore, log, timestampManager, pool);
   }
 
   @Override
@@ -143,12 +145,14 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
       try {
         if (getTimestampManager().isReferencePersisted(xid.getTS(),
             xid.getPid())) {
+          LOG.info("Recovery committing prepared transaction " + ta);
           xta.commit();
         }
       } catch (NoSuchTimestampException e) {
         // fall through
       } catch (IOException e) {
         LOG.error("Commit prepared tran failed during recovery " + ta, e);
+        e.printStackTrace(System.out);
       }
       // TODO conditions where we should abort here?
       return;
@@ -168,6 +172,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
       try {
         if (getTimestampManager().isReferencePersisted(xid.getTS(),
             xid.getPid())) {
+          LOG.info("Reclaim committing prepared transaction " + ta);
           xta.commit();
           return reclaim(ta);
         }
@@ -175,6 +180,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
         // fall through
       } catch (IOException e) {
         LOG.error("Commit prepared tran failed during recovery " + ta, e);
+        e.printStackTrace(System.out);
       }
       return false;
     }

@@ -123,12 +123,13 @@ public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
   }
 
   @Override
-  public synchronized void timeout(long current, long timeout)
-      throws IOException {
+  public synchronized void timeout(long timeout) throws IOException {
+    long current = System.currentTimeMillis();
     if (state == PREPARED && (current - lastTouched) < timeout) {
       try {
         if (getTimestampManager().isReferencePersisted(getID().getTS(),
             getID().getPid())) {
+          LOG.info("Timeout committing prepared transaction");
           commit();
           return;
         }
@@ -136,10 +137,11 @@ public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
         // fall through
       } catch (IOException e) {
         LOG.error("Timeout commit failed " + this, e);
+        e.printStackTrace(System.out);
         return;
       }
     }
-    super.timeout(current, timeout);
+    super.timeout(timeout);
   }
 
   @Override

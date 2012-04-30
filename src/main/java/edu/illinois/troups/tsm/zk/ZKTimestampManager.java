@@ -31,10 +31,10 @@ import org.apache.zookeeper.Watcher;
 import org.apache.zookeeper.data.Stat;
 
 import edu.illinois.troups.tsm.NoSuchTimestampException;
-import edu.illinois.troups.tsm.ReclaimableTimestampManager;
+import edu.illinois.troups.tsm.TimestampManager;
 
 public class ZKTimestampManager extends ZooKeeperListener implements
-    ReclaimableTimestampManager {
+    TimestampManager {
 
   protected final List<TimestampReclamationListener> listeners;
   protected final String timestampsNode;
@@ -71,7 +71,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     }
   }
 
-  @Override
+  // @Override
   public boolean isReleased(long ts) throws IOException {
     String tsNode = join(timestampsNode, ts);
     try {
@@ -169,7 +169,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
   }
 
   // TODO this method does not work
-  @Override
+  // @Override
   public long getLastCreatedTimestamp() throws IOException {
     Stat stat = new Stat();
     try {
@@ -181,7 +181,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     return stat.getCversion();
   }
 
-  @Override
+  // @Override
   public List<Long> getTimestamps() throws IOException {
     List<String> children;
     try {
@@ -198,7 +198,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
     return ids;
   }
 
-  @Override
+  // @Override
   public void setLastReclaimedTimestamp(long ts) throws IOException {
     byte[] data = Bytes.toBytes(ts);
     try {
@@ -228,7 +228,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
       lrt = getLastReclaimedTimestamp();
     } catch (IOException e) {
       System.err.println("Couldn't get latest reclaimed timestamp node");
-      e.printStackTrace();
+      e.printStackTrace(System.out);
       return;
     }
     for (TimestampReclamationListener listener : listeners)
@@ -236,7 +236,7 @@ public class ZKTimestampManager extends ZooKeeperListener implements
         listener.reclaimed(lrt);
       } catch (Throwable t) {
         System.out.println("Listener failed: " + listener);
-        t.printStackTrace();
+        t.printStackTrace(System.out);
       }
   }
 

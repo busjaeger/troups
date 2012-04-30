@@ -1,5 +1,6 @@
 package edu.illinois.troups;
 
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 public interface Constants {
@@ -16,7 +17,7 @@ public interface Constants {
 
   public static final String TRANSACTION_TIMEOUT = "troups.transaction.timeout";
 
-  public static final long DEFAULT_TRANSACTION_TIMEOUT = SECONDS.toMillis(180);
+  public static final long DEFAULT_TRANSACTION_TIMEOUT = MINUTES.toMillis(2);
 
   // Timestamp service configuration properties
 
@@ -28,12 +29,43 @@ public interface Constants {
 
   public static final int TSS_IMPL_VALUE_SERVER = 3;
 
-  public static final int DEFAULT_TSS_IMPL = TSS_IMPL_VALUE_ZOOKEEPER;
+  public static final int DEFAULT_TSS_IMPL = TSS_IMPL_VALUE_TABLE;
 
-  public static final String TSS_ZOOKEEPER_COLLECTOR_INTERVAL = "troups.tss.zookeeper.collector.interval";
+  public static final String TSS_COLLECTOR_INTERVAL = "troups.tss.collector.interval";
 
-  public static final long DEFAULT_TSS_ZOOKEEPER_COLLECTOR_INTERVAL = SECONDS
-      .toMicros(5);
+  public static final long DEFAULT_TSS_COLLECTOR_INTERVAL = SECONDS.toMicros(5);
+
+  // Timestamp service htable properties
+
+  public static final String TSS_TABLE_NAME = "troups.tss.table.name";
+
+  public static final String DEFAULT_TSS_TABLE_NAME = "troups-tss";
+
+  public static final String TSS_TABLE_FAMILY_NAME = "troups.tss.table.family.name";
+
+  public static final String DEFAULT_TSS_TABLE_FAMILY_NAME = "tss";
+
+  public static final String TSS_TIMESTAMP_TIMEOUT = "troups.tss.timestamp.timeout";
+
+  public static final long DEFAULT_TSS_TIMESTAMP_TIMEOUT = MINUTES.toMillis(5);
+
+  // Timestamp service zookeeper properties
+
+  public static final String ZOOKEEPER_ZNODE_BASE = "troups.zookeeper.znode.base";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_BASE = "troups";
+
+  public static final String ZOOKEEPER_ZNODE_TIMESTAMPS = "troups.zookeeper.znode.timestamps";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMPS = "timestamps";
+
+  public static final String ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS = "troups.zookeeper.znode.tsrs";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS = "tsrs";
+
+  public static final String ZOOKEEPER_ZNODE_LRT = "troups.zookeeper.znode.lrt";
+
+  public static final String DEFAULT_ZOOKEEPER_ZNODE_LRT = "lrt";
 
   // Log configuration properties
 
@@ -56,7 +88,7 @@ public interface Constants {
 
   public static final String LOG_TABLE_NAME = "troups.log.table.name";
 
-  public static final String DEFAULT_LOG_TABLE_NAME = "troups";
+  public static final String DEFAULT_LOG_TABLE_NAME = "troups-log";
 
   public static final String LOG_TABLE_FAMILY_NAME = "troups.log.table.family.name";
 
@@ -67,24 +99,6 @@ public interface Constants {
   public static final String LOG_FAMILY_NAME = "troups.log.family.name";
 
   public static final String DEFAULT_LOG_FAMILY_NAME = "log";
-
-  // ZooKeeper nodes
-
-  public static final String ZOOKEEPER_ZNODE_BASE = "zookeeper.znode.base";
-
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_BASE = "troups";
-
-  public static final String ZOOKEEPER_ZNODE_TIMESTAMPS = "zookeeper.znode.timestamps";
-
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMPS = "timestamps";
-
-  public static final String ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS = "zookeeper.znode.tsrs";
-
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_TIMESTAMP_RECLAIMERS = "tsrs";
-
-  public static final String ZOOKEEPER_ZNODE_LRT = "zookeeper.znode.lrt";
-
-  public static final String DEFAULT_ZOOKEEPER_ZNODE_LRT = "lrt";
 
   // internal constants
 

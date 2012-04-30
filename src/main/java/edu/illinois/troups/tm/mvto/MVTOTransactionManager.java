@@ -28,6 +28,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -131,6 +132,8 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   protected final TimestampManager timestampManager;
   // used to order transactions by timestamp
   protected final Comparator<MVTOTransaction<K>> timestampComparator;
+  // pool for scheduling finalization
+  protected final ExecutorService pool;
 
   // mutable state
   // transactions by transaction ID for efficient direct lookup
@@ -157,10 +160,12 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   protected ReadWriteLock reclaimLock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
-      TransactionLog<K, R> transactionLog, TimestampManager tsm) {
+      TransactionLog<K, R> transactionLog, TimestampManager tsm,
+      ExecutorService pool) {
     this.keyValueStore = keyValueStore;
     this.transactionLog = transactionLog;
     this.timestampManager = tsm;
+    this.pool = pool;
     this.timestampComparator = new Comparator<MVTOTransaction<K>>() {
       @Override
       public int compare(MVTOTransaction<K> t1, MVTOTransaction<K> t2) {
@@ -186,6 +191,10 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
 
   public TimestampManager getTimestampManager() {
     return timestampManager;
+  }
+
+  public ExecutorService getPool() {
+    return pool;
   }
 
   public void start() {
@@ -242,7 +251,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       if (closing || !running)
         return;
     } finally {
-      runLock.readLock().lock();
+      runLock.readLock().unlock();
     }
     if (!runLock.writeLock().tryLock()) {
       while (true) {
@@ -267,12 +276,12 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   }
 
   public void timeout(long timeout) {
-    long current = System.currentTimeMillis();
     for (MVTOTransaction<K> ta : getTransactions())
       try {
-        ta.timeout(current, timeout);
+        ta.timeout(timeout);
       } catch (Throwable t) {
         LOG.error("Failed to timeout transaction " + ta, t);
+        t.printStackTrace(System.out);
       }
   }
 
@@ -282,7 +291,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       if (!running)
         return;
     } finally {
-      runLock.readLock().lock();
+      runLock.readLock().unlock();
     }
     runLock.writeLock().lock();
     try {
@@ -426,6 +435,30 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
         System.out.println("Aborted " + tid);
       }
     }.run(tid);
+  }
+
+  void finalize(final TID tid) throws IOException {
+    new IfRunning() {
+      @Override
+      void execute(MVTOTransaction<K> ta) throws IOException {
+        ta.finalize();
+      }
+    }.run(tid);
+  }
+
+  void scheduleFinalize(final TID tid) {
+    pool.submit(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          MVTOTransactionManager.this.finalize(tid);
+        } catch (Throwable t) {
+          // will retry later: commit itself was OK
+          LOG.error("Failed to finalize transaction " + this, t);
+          t.printStackTrace(System.out);
+        }
+      }
+    });
   }
 
   abstract class IfRunning {
@@ -630,6 +663,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
             transactionLog.truncate(cutoff);
           } catch (IOException e) {
             LOG.error("Failed to truncate transaction log", e);
+            e.printStackTrace(System.out);
           }
         }
       } finally {
@@ -658,17 +692,11 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       return true;
     case STARTED:
     case BLOCKED:
-      System.out.println("WARNING: found active TAs before oldest timestamp "
-          + ta);
+      LOG.warn("found active TAs before oldest timestamp " + ta);
       break;
     case ABORTED:
     case COMMITTED:
-      try {
-        ta.finalize();
-        return reclaim(ta);
-      } catch (Throwable t) {
-        LOG.error("Retried abort finalized failed for " + ta, t);
-      }
+      scheduleFinalize(ta.getID());
       break;
     case FINALIZED:
       /*
@@ -760,11 +788,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       break;
     case ABORTED:
     case COMMITTED:
-      try {
-        ta.finalize();
-      } catch (Throwable t) {
-        LOG.error("Finalize during recovery failed for " + ta, t);
-      }
+      scheduleFinalize(ta.getID());
       break;
     case FINALIZED:
       // nothing to do here, but be happy

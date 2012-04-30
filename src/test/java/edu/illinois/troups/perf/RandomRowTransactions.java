@@ -44,7 +44,7 @@ public class RandomRowTransactions {
     try {
       admin.createTable(desc);
     } catch (TableExistsException e) {
-      e.printStackTrace();
+      e.printStackTrace(System.out);
       // ignore
     }
 
@@ -107,7 +107,7 @@ public class RandomRowTransactions {
       } catch (TransactionAbortedException e) {
         abortCount++;
       } catch (Exception e) {
-        e.printStackTrace();
+        e.printStackTrace(System.out);
         failureCount++;
         ta.rollback();
       }

@@ -44,7 +44,7 @@ public class SingleTableTest {
     try {
       admin.createTable(desc);
     } catch (TableExistsException e) {
-      e.printStackTrace();
+      e.printStackTrace(System.out);
       // ignore
     }
     // create row to see if it makes a difference
