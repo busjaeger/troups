@@ -1,11 +1,13 @@
 package edu.illinois.troups.tsm.table;
 
 import java.io.IOException;
-import java.util.NavigableMap;
-import java.util.Map.Entry;
+import java.util.ArrayList;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.ResultScanner;
+import org.apache.hadoop.hbase.util.Bytes;
 
 public class HTableTimestampReclaimer implements Runnable {
 
@@ -20,7 +22,9 @@ public class HTableTimestampReclaimer implements Runnable {
 
   @Override
   public void run() {
-    NavigableMap<Long, NavigableMap<byte[], byte[]>> timestamps;
+    long before = System.currentTimeMillis();
+
+    ResultScanner timestamps;
     try {
       timestamps = tsm.getTimestamps();
     } catch (IOException e) {
@@ -28,30 +32,36 @@ public class HTableTimestampReclaimer implements Runnable {
       e.printStackTrace(System.out);
       return;
     }
-    if (timestamps.isEmpty())
-      return;
-    Long reclaimed = null;
-    for (Entry<Long, NavigableMap<byte[], byte[]>> ts : timestamps.entrySet()) {
-      NavigableMap<byte[], byte[]> columns = ts.getValue();
-      if (tsm.isReclaimable(columns))
-        reclaimed = ts.getKey();
+
+    ArrayList<Result> reclaimables = new ArrayList<Result>();
+    for (Result timestamp : timestamps) {
+      if (tsm.isReclaimable(timestamp))
+        reclaimables.add(timestamp);
       else
         break;
     }
-    if (reclaimed != null) {
+
+    if (!reclaimables.isEmpty()) {
+      Result last = reclaimables.get(reclaimables.size() - 1);
+      long reclaimed = Bytes.toLong(last.getRow());
       try {
         tsm.setLastReclaimedTimestamp(reclaimed);
       } catch (IOException e) {
         LOG.error("Failed to set last reclaimed", e);
         e.printStackTrace(System.out);
       }
-      try {
-        tsm.deleteTimestamps(reclaimed);
-      } catch (IOException e) {
-        LOG.error("Failed to delete reclaimed timestamps", e);
-        e.printStackTrace(System.out);
+      for (Result timestamp : reclaimables) {
+        try {
+          tsm.deleteTimestamp(timestamp);
+        } catch (IOException e) {
+          LOG.error("Failed to delete reclaimed timestamps", e);
+          e.printStackTrace(System.out);
+        }
       }
     }
+
+    LOG.info("Timestamp collection took: "
+        + (System.currentTimeMillis() - before));
   }
 
 }

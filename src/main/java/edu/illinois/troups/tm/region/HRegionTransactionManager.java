@@ -1,7 +1,6 @@
 package edu.illinois.troups.tm.region;
 
 import static edu.illinois.troups.Constants.DEFAULT_LOG_IMPL;
-import static edu.illinois.troups.Constants.DEFAULT_LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.DEFAULT_TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.DEFAULT_TRANSACTION_TIMEOUT;
 import static edu.illinois.troups.Constants.DEFAULT_TSS_IMPL;
@@ -10,14 +9,12 @@ import static edu.illinois.troups.Constants.LOG_IMPL;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FAMILY;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FILE;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_TABLE;
-import static edu.illinois.troups.Constants.LOG_TABLE_NAME;
 import static edu.illinois.troups.Constants.TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.TRANSACTION_TIMEOUT;
 import static edu.illinois.troups.Constants.TSS_IMPL;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_SERVER;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_TABLE;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_ZOOKEEPER;
-import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -30,7 +27,6 @@ import java.util.NavigableSet;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +46,9 @@ import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.HTableInterface;
+import org.apache.hadoop.hbase.client.HTableInterfaceFactory;
+import org.apache.hadoop.hbase.client.HTablePool;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
@@ -107,6 +106,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private RowGroupPolicy groupPolicy;
   private GroupLogStore logStore;
   private ScheduledExecutorService pool;
+  private HTablePool tablePool;
   private long transactionTimeout;
 
   private SharedTimestampManager tsm;
@@ -168,6 +168,27 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int count = conf.getInt(TM_THREAD_COUNT, DEFAULT_TM_THREAD_COUNT);
     pool = Executors.newScheduledThreadPool(count);
 
+    final HConnection connection = env.getRegionServerServices()
+        .getCatalogTracker().getConnection();
+    tablePool = new HTablePool(conf, Integer.MAX_VALUE,
+        new HTableInterfaceFactory() {
+          @Override
+          public void releaseHTableInterface(HTableInterface table)
+              throws IOException {
+            table.close();
+          }
+
+          @Override
+          public HTableInterface createHTableInterface(Configuration config,
+              byte[] tableName) {
+            try {
+              return new HTable(tableName, connection, pool);
+            } catch (IOException e) {
+              throw new RuntimeException(e);
+            }
+          }
+        });
+
     transactionTimeout = conf.getLong(TRANSACTION_TIMEOUT,
         DEFAULT_TRANSACTION_TIMEOUT);
 
@@ -182,9 +203,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       break;
     case TSS_IMPL_VALUE_TABLE:
       zkw = env.getRegionServerServices().getZooKeeper();
-      HConnection connection = env.getRegionServerServices()
-          .getCatalogTracker().getConnection();
-      tsm = HTableSharedTimestampManager.newInstance(connection, pool);
+      tsm = HTableSharedTimestampManager.newInstance(conf, tablePool, pool);
       r = new HTableTimestampReclaimer((HTableSharedTimestampManager) tsm);
       collector = new TimestampReclaimer(r, conf, pool, zkw);
       break;
@@ -198,16 +217,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int logImpl = conf.getInt(LOG_IMPL, DEFAULT_LOG_IMPL);
     switch (logImpl) {
     case LOG_IMPL_VALUE_TABLE:
-      HConnection connection = env.getRegionServerServices()
-          .getCatalogTracker().getConnection();
-      byte[] logTableName = toBytes(conf.get(LOG_TABLE_NAME,
-          DEFAULT_LOG_TABLE_NAME));
-      byte[] logFamilyName = toBytes(conf.get(LOG_TABLE_NAME,
-          DEFAULT_LOG_TABLE_NAME));
-      HTable logTable = demandTable(connection, pool, logTableName,
-          logFamilyName);
       byte[] tableName = region.getTableDesc().getName();
-      logStore = new HTableLogStore(logTable, logFamilyName, tableName);
+      logStore = HTableLogStore.newInstance(tablePool, conf, tableName);
       break;
     case LOG_IMPL_VALUE_FILE:
       FileSystem fs = region.getFilesystem();
@@ -600,10 +611,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     return new HKey(groupPolicy == null ? row : groupPolicy.getGroupKey(row));
   }
 
-  public static HTable demandTable(HConnection connection,
-      ExecutorService pool, byte[] tableName, byte[] familyName)
-      throws IOException {
-    Configuration conf = connection.getConfiguration();
+  public static void demandTable(Configuration conf, byte[] tableName,
+      byte[] familyName) throws IOException {
     // create log table if necessary
     HBaseAdmin admin = new HBaseAdmin(conf);
     if (!admin.tableExists(tableName)) {
@@ -615,7 +624,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         // ignore: concurrent creation
       }
     }
-    return pool == null ? new HTable(conf, tableName) : new HTable(tableName,
-        connection, pool);
   }
+
 }

@@ -1,12 +1,7 @@
 package edu.illinois.troups.tsm.table;
 
-import static org.apache.hadoop.hbase.util.Bytes.BYTES_COMPARATOR;
-
 import java.io.IOException;
 import java.util.List;
-import java.util.Map.Entry;
-import java.util.NavigableMap;
-import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -15,9 +10,12 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.HTable;
+import org.apache.hadoop.hbase.client.HTableInterface;
+import org.apache.hadoop.hbase.client.HTablePool;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.ResultScanner;
+import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.troups.tsm.TimestampManager;
@@ -27,9 +25,11 @@ public class HTableTimestampManager implements TimestampManager {
   private static final Log LOG = LogFactory
       .getLog(HTableTimestampManager.class);
 
-  protected static final byte[] counterRow = Bytes.toBytes(0);
-  protected static final byte[] lastReclaimedRow = Bytes.toBytes(1);
-  protected static final byte[] timestampRow = Bytes.toBytes(2);
+  // counter rows between zero and 1
+  protected static final byte[] counterRow = new byte[] { 0, 0, 0, 0, 0, 0, 0,
+      0, 0 };
+  protected static final byte[] lastReclaimedRow = new byte[] { 0, 0, 0, 0, 0,
+      0, 0, 0, 1 };
 
   protected static final byte[] releasedColumn = Bytes.toBytes("released");
   protected static final byte[] timeColumn = Bytes.toBytes("time");
@@ -37,7 +37,8 @@ public class HTableTimestampManager implements TimestampManager {
   protected static final byte[] notReleased = Bytes.toBytes(false);
   protected static final byte[] released = Bytes.toBytes(true);
 
-  protected final HTable tsTable;
+  protected final HTablePool tablePool;
+  protected final byte[] tableName;
   protected final byte[] tsFamily;
   protected final ScheduledExecutorService pool;
   protected final long timestampTimeout;
@@ -45,58 +46,73 @@ public class HTableTimestampManager implements TimestampManager {
 
   private long reclaimed = 0;
 
-  public HTableTimestampManager(HTable tsTable, byte[] tsFamily,
-      ScheduledExecutorService pool, long timestampTimeout) {
-    this.tsTable = tsTable;
+  public HTableTimestampManager(HTablePool tablePool, byte[] tableName,
+      byte[] tsFamily, ScheduledExecutorService pool, long timestampTimeout) {
+    this.tablePool = tablePool;
+    this.tableName = tableName;
     this.tsFamily = tsFamily;
     this.pool = pool;
     this.timestampTimeout = timestampTimeout;
-    // pre-create counter row
-    Put put = new Put(Bytes.toBytes(3));
-    put.add(tsFamily, releasedColumn, released);
-    try {
-      tsTable.put(put);
-    } catch (IOException e) {
-      LOG.error("error on initial put", e);
-      e.printStackTrace(System.out);
-    }
   }
 
   @Override
   public long acquire() throws IOException {
-    long ts = tsTable.incrementColumnValue(counterRow, tsFamily, timeColumn, 1);
-    Put put = new Put(timestampRow, ts);
-    put.add(tsFamily, releasedColumn, notReleased);
-    put.add(tsFamily, timeColumn, Bytes.toBytes(System.currentTimeMillis()));
-    tsTable.put(put);
-    return ts;
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      long ts = tsTable.incrementColumnValue(counterRow, tsFamily, timeColumn,
+          1);
+      byte[] row = Bytes.toBytes(ts);
+      Put put = new Put(row, ts);
+      put.add(tsFamily, releasedColumn, notReleased);
+      put.add(tsFamily, timeColumn, Bytes.toBytes(System.currentTimeMillis()));
+      tsTable.put(put);
+      return ts;
+    } finally {
+      tsTable.close();
+    }
   }
 
   @Override
   public boolean release(long ts) throws IOException {
-    Put put = new Put(timestampRow, ts);
-    put.add(tsFamily, releasedColumn, released);
-    boolean released =tsTable.checkAndPut(timestampRow, tsFamily, releasedColumn,
-        notReleased, put);
-    if (!released)
-      LOG.warn("Failed to release timestamp "+ts);
-    return released;
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      byte[] row = Bytes.toBytes(ts);
+      Put put = new Put(row, ts);
+      put.add(tsFamily, releasedColumn, released);
+      boolean released = tsTable.checkAndPut(row, tsFamily, releasedColumn,
+          notReleased, put);
+      if (!released)
+        LOG.warn("Failed to release timestamp " + ts);
+      return released;
+    } finally {
+      tsTable.close();
+    }
   }
 
   @Override
   public long getLastReclaimedTimestamp() throws IOException {
-    Get get = new Get(lastReclaimedRow);
-    get.addColumn(tsFamily, null);
-    Result result = tsTable.get(get);
-    byte[] value = result.getValue(tsFamily, null);
-    return value == null ? 0L : Bytes.toLong(value);
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      Get get = new Get(lastReclaimedRow);
+      get.addColumn(tsFamily, null);
+      Result result = tsTable.get(get);
+      byte[] value = result.getValue(tsFamily, null);
+      return value == null ? 0L : Bytes.toLong(value);
+    } finally {
+      tsTable.close();
+    }
   }
 
   // internal
   void setLastReclaimedTimestamp(long ts) throws IOException {
-    Put put = new Put(lastReclaimedRow, 1l);
-    put.add(tsFamily, null, Bytes.toBytes(ts));
-    tsTable.put(put);
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      Put put = new Put(lastReclaimedRow, 1l);
+      put.add(tsFamily, null, Bytes.toBytes(ts));
+      tsTable.put(put);
+    } finally {
+      tsTable.close();
+    }
   }
 
   @Override
@@ -141,47 +157,41 @@ public class HTableTimestampManager implements TimestampManager {
 
   // internal
   long getLastCreatedTimestamp() throws IOException {
-    Get get = new Get(counterRow);
-    get.setTimeStamp(1l);
-    get.addColumn(tsFamily, timeColumn);
-    Result result = tsTable.get(get);
-    byte[] value = result.getValue(tsFamily, null);
-    return value == null ? 0L : Bytes.toLong(value);
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      Get get = new Get(counterRow);
+      get.setTimeStamp(1l);
+      get.addColumn(tsFamily, timeColumn);
+      Result result = tsTable.get(get);
+      byte[] value = result.getValue(tsFamily, null);
+      return value == null ? 0L : Bytes.toLong(value);
+    } finally {
+      tsTable.close();
+    }
   }
 
   // internal
-  NavigableMap<Long, NavigableMap<byte[], byte[]>> getTimestamps()
-      throws IOException {
-    Get get = new Get(timestampRow);
-    get.addFamily(tsFamily);
-    Result result = tsTable.get(get);
-    NavigableMap<Long, NavigableMap<byte[], byte[]>> timestamps = new TreeMap<Long, NavigableMap<byte[], byte[]>>();
-    if (result.getMap().isEmpty())
-      return timestamps;
-    NavigableMap<byte[], NavigableMap<Long, byte[]>> columns = result.getMap()
-        .get(timestampRow);
-    for (Entry<byte[], NavigableMap<Long, byte[]>> column : columns.entrySet()) {
-      byte[] c = column.getKey();
-      for (Entry<Long, byte[]> version : column.getValue().entrySet()) {
-        Long ts = version.getKey();
-        NavigableMap<byte[], byte[]> tsMap = timestamps.get(ts);
-        if (tsMap == null)
-          timestamps.put(ts, tsMap = new TreeMap<byte[], byte[]>(
-              BYTES_COMPARATOR));
-        tsMap.put(c, version.getValue());
-      }
+  ResultScanner getTimestamps() throws IOException {
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      Scan scan = new Scan();
+      scan.setStartRow(Bytes.toBytes(Long.MIN_VALUE));
+      scan.setStopRow(Bytes.toBytes(Long.MAX_VALUE));
+      scan.addFamily(tsFamily);
+      return tsTable.getScanner(scan);
+    } finally {
+      tsTable.close();
     }
-    return timestamps;
   }
 
-  boolean isReclaimable(NavigableMap<byte[], byte[]> timestamp) {
-    byte[] bytes = timestamp.get(releasedColumn);
+  boolean isReclaimable(Result timestamp) {
+    byte[] bytes = timestamp.getValue(tsFamily, releasedColumn);
     // if timestamp has been released, it can be reclaimed
     if (Bytes.toBoolean(bytes))
       return true;
     // if tiemstamp has timed out, it can be reclaimed
     // note: clock skew can cause problems here, could use ticks instead
-    long time = Bytes.toLong(timestamp.get(timeColumn));
+    long time = Bytes.toLong(timestamp.getValue(tsFamily, timeColumn));
     long current = System.currentTimeMillis();
     if (current > time && (time + timestampTimeout) < current)
       return true;
@@ -189,9 +199,15 @@ public class HTableTimestampManager implements TimestampManager {
     return false;
   }
 
-  void deleteTimestamps(long ts) throws IOException {
-    Delete delete = new Delete(timestampRow);
-    delete.deleteFamily(tsFamily, ts);
-    tsTable.delete(delete);
+  void deleteTimestamp(Result timestamp) throws IOException {
+    HTableInterface tsTable = tablePool.getTable(tableName);
+    try {
+      Delete delete = new Delete(timestamp.getRow());
+      delete.deleteFamily(tsFamily);
+      tsTable.delete(delete);
+    } finally {
+      tsTable.close();
+    }
   }
+
 }

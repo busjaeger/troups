@@ -40,7 +40,7 @@ public class MVTOTransactionManagerTest {
     log = new StringKeyLog();
     tsm = new InMemoryTimestampManager();
     tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log,
-        tsm, null);//TODO fix
+        tsm, null);// TODO fix
     kvs.addTransactionOperationObserver(tm);
     tm.start();
   }
@@ -173,7 +173,7 @@ public class MVTOTransactionManagerTest {
     }
 
     tm = new MVTOTransactionManager<StringKey, StringKeyLogRecord>(kvs, log,
-        tsm, null);//TODO fix
+        tsm, null);// TODO fix
     tm.start();
     f = es.submit(commit2);
     tm.commit(t1);

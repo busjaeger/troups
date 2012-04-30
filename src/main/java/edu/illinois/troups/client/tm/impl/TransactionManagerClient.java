@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.HConnection;
 import org.apache.hadoop.hbase.client.HConnectionManager;
+import org.apache.hadoop.hbase.client.HTablePool;
 import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;
 
 import edu.illinois.troups.client.tm.Transaction;
@@ -29,16 +30,18 @@ public class TransactionManagerClient extends TransactionManager {
   private final ExecutorService pool;
 
   public TransactionManagerClient(Configuration conf) throws IOException {
-    HConnection connection = HConnectionManager.getConnection(conf);
-    @SuppressWarnings("deprecation")
-    ZooKeeperWatcher zkw = connection.getZooKeeperWatcher();
+
     int tssImpl = conf.getInt(TSS_IMPL, DEFAULT_TSS_IMPL);
     switch (tssImpl) {
     case TSS_IMPL_VALUE_ZOOKEEPER:
+      HConnection connection = HConnectionManager.getConnection(conf);
+      @SuppressWarnings("deprecation")
+      ZooKeeperWatcher zkw = connection.getZooKeeperWatcher();
       this.stsm = new ZKSharedTimestampManager(zkw);
       break;
     case TSS_IMPL_VALUE_TABLE:
-      this.stsm = HTableSharedTimestampManager.newInstance(connection, null);
+      this.stsm = HTableSharedTimestampManager.newInstance(conf,
+          new HTablePool(), null);
       break;
     default:
       throw new IllegalStateException("Unknown TSS implementation " + tssImpl);
