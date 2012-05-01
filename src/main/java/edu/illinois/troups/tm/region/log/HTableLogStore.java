@@ -16,7 +16,6 @@ import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.HTablePool;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
-import org.mortbay.log.Log;
 
 import edu.illinois.troups.tm.region.HKey;
 
@@ -72,8 +71,6 @@ public class HTableLogStore implements GroupLogStore {
     try {
       Put put = new Put(groupKey.getRow(), sid);
       put.add(logFamilyName, tableName, value);
-      Log.info("Thread: " + Thread.currentThread().toString() + " Log Table: "
-          + logTable.hashCode());
       logTable.put(put);
     } finally {
       logTable.close();

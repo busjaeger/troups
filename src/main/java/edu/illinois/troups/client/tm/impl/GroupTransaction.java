@@ -79,8 +79,10 @@ public class GroupTransaction extends AbstractTransaction implements
       throw new IllegalStateException("No data to commit");
     try {
       getTM(group).commit(group.getKey(), id);
-    } catch (IOException e) {
-      throw new RuntimeException("Failed to commit", e);
+    } catch (TransactionAbortedException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new RuntimeException("Failed to commit", t);
     }
     completed = true;
   }

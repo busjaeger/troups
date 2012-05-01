@@ -723,5 +723,4 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       break;
     }
   }
-
 }

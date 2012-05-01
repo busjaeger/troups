@@ -308,7 +308,9 @@ class MVTOTransaction<K extends Key> {
     MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
     // if value is not yet committed, add a dependency in case writer aborts
     if (writer != null && writer.isRunning()) {
-      writer.readBy.add(this);
+      synchronized (writer) {
+        writer.readBy.add(this);
+      }
       this.readFrom.add(writer);
     }
     reads.put(key, version);
@@ -455,9 +457,12 @@ class MVTOTransaction<K extends Key> {
   }
 
   synchronized void notifyReadBy() {
-    for (MVTOTransaction<K> ta : readBy)
-      if (readFrom.remove(ta) && readFrom.isEmpty())
-        notify();
+    for (MVTOTransaction<K> ta : readBy) {
+      synchronized (ta) {
+        if (ta.readFrom.remove(this) && ta.readFrom.isEmpty())
+          ta.notify();
+      }
+    }
   }
 
   synchronized void unblock() {

@@ -84,34 +84,44 @@ public class SingleRowTransactions {
       begint += (now - before);
       try {
         beforeOp = now;
-        Get get = new Get(row);
-        get.addColumn(familyName, qualifierName);
-        table.get(ta, get);
-        now = System.currentTimeMillis();
-        gett += (now - beforeOp);
+        try {
+          Get get = new Get(row);
+          get.addColumn(familyName, qualifierName);
+          table.get(ta, get);
+        } finally {
+          now = System.currentTimeMillis();
+          gett += (now - beforeOp);
+        }
 
         beforeOp = now;
-        Put put = new Put(row);
-        put.add(familyName, qualifierName, new byte[1024]);
-        table.put(ta, put);
-        now = System.currentTimeMillis();
-        putt += (now - beforeOp);
+        try {
+          Put put = new Put(row);
+          put.add(familyName, qualifierName, new byte[1024]);
+          table.put(ta, put);
+        } finally {
+          now = System.currentTimeMillis();
+          putt += (now - beforeOp);
+        }
 
         beforeCommit = now;
-        ta.commit();
-        now = System.currentTimeMillis();
-        committ += (now - beforeCommit);
+        try {
+          ta.commit();
+        } finally {
+          now = System.currentTimeMillis();
+          committ += (now - beforeCommit);
+        }
 
-        tt += (now - before);
       } catch (TransactionAbortedException e) {
         abortCount++;
       } catch (Exception e) {
         e.printStackTrace(System.out);
         failureCount++;
         ta.rollback();
+      } finally {
+        tt += (now - before);
       }
 
-      if (i % 100 == 0)
+      if (i != 0 && i % 100 == 0)
         System.out.println("100 times");
     }
 

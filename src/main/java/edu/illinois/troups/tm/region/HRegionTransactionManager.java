@@ -45,7 +45,6 @@ import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
-import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.HTableInterfaceFactory;
@@ -473,12 +472,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (tidBytes != null)
       return new XID(tidBytes);
     return null;
-  }
-
-  private static boolean getBoolean(OperationWithAttributes operation,
-      String name) {
-    byte[] bytes = operation.getAttribute(name);
-    return bytes == null ? false : Bytes.toBoolean(bytes);
   }
 
   static <F, T> Function<? super Iterable<F>, ? extends Iterable<T>> map(

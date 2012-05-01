@@ -38,29 +38,6 @@ public interface TimestampManager extends Comparator<Long> {
    */
   boolean release(long ts) throws IOException;
 
-  // /**
-  // * Can be used by clients to check whether they are the owner of the given
-  // * timestamp.
-  // *
-  // * @param ts
-  // * @return
-  // */
-  // boolean isHeldByCaller(long ts) throws NoSuchTimestampException,
-  // IOException;
-//
-//  boolean isReleased(long ts) throws IOException;
-
-  // /**
-  // *
-  // * @param ts
-  // * @param listener
-  // * @return boolean if the timestamp existed and a listener was successfully
-  // * set, false otherwise
-  // * @throws IOException
-  // */
-  // boolean addTimestampListener(long ts, TimestampListener listener)
-  // throws IOException;
-
   /**
    * Returns the last timestamp deleted
    * 
