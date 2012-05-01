@@ -65,12 +65,6 @@ public class HGroupTransactionLog implements TransactionLog<HKey, HRecord> {
   }
 
   @Override
-  public long appendDelete(TID tid, HKey key) throws IOException {
-    HRecord record = new HDeleteRecord(tid, key);
-    return append(groupKey, record);
-  }
-
-  @Override
   public void truncate(long sid) throws IOException {
     logStore.truncate(groupKey, sid);
   }
@@ -105,8 +99,6 @@ public class HGroupTransactionLog implements TransactionLog<HKey, HRecord> {
       return new HStateTransitionRecord();
     case RECORD_TYPE_GET:
       return new HGetRecord();
-    case RECORD_TYPE_DELETE:
-      return new HDeleteRecord();
     case RECORD_TYPE_PUT:
       return new HPutRecord();
     default:

@@ -2,7 +2,6 @@ package edu.illinois.troups.tm.mvto;
 
 import static edu.illinois.troups.tm.XATransactionState.JOINED;
 import static edu.illinois.troups.tm.XATransactionState.PREPARED;
-import static edu.illinois.troups.tm.mvto.TransientTransactionState.CREATED;
 
 import java.io.IOException;
 
@@ -10,7 +9,6 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import edu.illinois.troups.tm.Key;
-import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.XID;
 import edu.illinois.troups.tm.log.XATransactionLog;
@@ -21,13 +19,9 @@ public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
 
   private static final Log LOG = LogFactory.getLog(MVTOXATransaction.class);
 
-  public MVTOXATransaction(MVTOXATransactionManager<K, ?> tm) {
-    super(tm);
-  }
-
-  @Override
-  protected boolean shouldBegin() {
-    throw newISA("Cannot begin XA transaction");
+  public MVTOXATransaction(MVTOXATransactionManager<K, ?> tm, XID tid, long sid,
+      int state) {
+    super(tm, tid, sid, state);
   }
 
   @Override
@@ -38,30 +32,6 @@ public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
       return true;
     }
     return super.isRunning();
-  }
-
-  public synchronized void join(TID id) throws IOException {
-    checkJoin();
-    long ts = id.getTS();
-    long pid = getTimestampManager().acquireReference(ts);
-    XID xid = new XID(ts, pid);
-    long sid = getTransactionLog().appendXAStateTransition(xid, JOINED);
-    setJoined(xid, sid);
-  }
-
-  protected void checkJoin() {
-    switch (state) {
-    case CREATED:
-      break;
-    default:
-      throw newISA("join");
-    }
-  }
-
-  protected void setJoined(XID id, long sid) {
-    this.id = id;
-    this.sid = sid;
-    this.state = JOINED;
   }
 
   public synchronized void prepare() throws TransactionAbortedException,
@@ -154,7 +124,7 @@ public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
     return (XATransactionLog<K, ?>) tm.getTransactionLog();
   }
 
-  synchronized XID getID() {
+  XID getID() {
     return (XID) super.getID();
   }
 

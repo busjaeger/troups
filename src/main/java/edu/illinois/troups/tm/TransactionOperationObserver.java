@@ -27,13 +27,4 @@ public interface TransactionOperationObserver<K extends Key> {
   void afterPut(TID tid, Iterable<? extends K> keys)
       throws TransactionAbortedException, IOException;
 
-  void beforeDelete(TID tid, Iterable<? extends K> keys)
-      throws TransactionAbortedException, IOException;
-
-  void failedDelete(TID tid, Iterable<? extends K> keys, Throwable t)
-      throws TransactionAbortedException, IOException;
-
-  void afterDelete(TID tid, Iterable<? extends K> keys)
-      throws TransactionAbortedException, IOException;
-
 }

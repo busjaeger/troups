@@ -49,16 +49,6 @@ public class XID extends TID implements Writable {
   }
 
   @Override
-  public int compareTo(TID o) {
-    int c = super.compareTo(o);
-    if (c == 0 && o instanceof XID) {
-      XID xid = (XID) o;
-      c = Long.valueOf(pid).compareTo(xid.pid);
-    }
-    return c;
-  }
-
-  @Override
   public void write(DataOutput out) throws IOException {
     super.write(out);
     out.writeLong(pid);

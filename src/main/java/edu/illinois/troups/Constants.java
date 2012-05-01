@@ -106,8 +106,4 @@ public interface Constants {
 
   public static final String ATTR_NAME_XID = "troups-xid";
 
-  public static final String ATTR_NAME_DEL = "troups-del";
-
-  public static final String ATTR_NAME_BEG = "troups-beg";
-
 }

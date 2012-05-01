@@ -6,10 +6,8 @@ import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.WritableUtils;
 
-import edu.illinois.troups.Constants;
 import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
@@ -35,13 +33,6 @@ public abstract class AbstractTransaction implements Transaction {
     TID tid = getTID(table, policy, row);
     Put put = new Put(row, tid.getTS());
     setTID(put, tid);
-    return put;
-  }
-
-  @Override
-  public Put enlistDelete(HTable table, RowGroupPolicy policy, byte[] row) {
-    Put put = enlistPut(table, policy, row);
-    put.setAttribute(Constants.ATTR_NAME_DEL, Bytes.toBytes(true));
     return put;
   }
 

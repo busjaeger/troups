@@ -45,6 +45,7 @@ import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.HConnection;
+import org.apache.hadoop.hbase.client.HConnectionManager;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.HTableInterfaceFactory;
@@ -272,7 +273,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     LOG.info("commit time " + average(commitT, commitN));
 
     for (MVTOXATransactionManager<HKey, HRecord> tm : tms.values())
-      tm.stop();
+      tm.stopping();
   }
 
   @Override
@@ -297,16 +298,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     try {
       if (put.getTimeStamp() != tid.getTS())
         throw new IllegalArgumentException("timestamp does not match tid");
-      boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
       // create an HKey set view on the family map
       HKey groupKey = getGroupKey(put.getRow());
       Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
           .getFamilyMap().values(), HRegionTransactionManager
           .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
-      if (isDelete)
-        getTM(groupKey).beforeDelete(tid, keys);
-      else
-        getTM(groupKey).beforePut(tid, keys);
+      getTM(groupKey).beforePut(tid, keys);
     } finally {
       prePutN++;
       prePutT += System.currentTimeMillis() - before;
@@ -321,15 +318,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       return;
     long before = System.currentTimeMillis();
     try {
-      boolean isDelete = getBoolean(put, Constants.ATTR_NAME_DEL);
       HKey groupKey = getGroupKey(put.getRow());
       Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
           .getFamilyMap().values(), HRegionTransactionManager
           .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
-      if (isDelete)
-        getTM(groupKey).beforeDelete(tid, keys);
-      else
-        getTM(groupKey).beforePut(tid, keys);
+      getTM(groupKey).beforePut(tid, keys);
     } finally {
       postPutN++;
       postPutT += System.currentTimeMillis() - before;

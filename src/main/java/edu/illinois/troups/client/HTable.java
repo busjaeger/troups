@@ -46,22 +46,6 @@ public class HTable implements Closeable {
     hTable.put(hPut);
   }
 
-  /*
-   * Note that deletes are transformed into put(null). This is because we cannot
-   * actually remove data for a given version, because the current transaction
-   * may abort. To make sure the TM treats this as a delete so that it can
-   * prevent clients from reading the cell, the put is annotated with a delete
-   * marker that is interpreted by our Coprocessor.
-   */
-  public void delete(Transaction ta, Delete delete) throws IOException {
-    org.apache.hadoop.hbase.client.Put hPut = ta.enlistDelete(hTable,
-        groupPolicy, delete.getRow());
-    for (List<KeyValue> kvl : delete.getFamilyMap().values())
-      for (KeyValue kv : kvl)
-        hPut.add(kv.getFamily(), kv.getQualifier(), null);
-    hTable.put(hPut);
-  }
-
   @Override
   public void close() throws IOException {
     hTable.close();

@@ -3,11 +3,23 @@ package edu.illinois.troups.tm;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.Comparator;
 
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.Writable;
 
-public class TID implements Comparable<TID>, Writable {
+import edu.illinois.troups.tsm.TimestampManager;
+
+public class TID implements Writable {
+
+  public static Comparator<TID> newComparator(final TimestampManager tsm) {
+    return new Comparator<TID>() {
+      @Override
+      public int compare(TID o1, TID o2) {
+        return tsm.compare(o1.getTS(), o2.getTS());
+      }
+    };
+  }
 
   private long ts;
 
@@ -43,12 +55,6 @@ public class TID implements Comparable<TID>, Writable {
   @Override
   public int hashCode() {
     return Long.valueOf(ts).hashCode();
-  }
-
-  // TODO should use TSM comparator
-  @Override
-  public int compareTo(TID o) {
-    return Long.valueOf(ts).compareTo(o.ts);
   }
 
   @Override

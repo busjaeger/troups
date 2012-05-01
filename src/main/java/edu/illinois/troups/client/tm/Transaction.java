@@ -15,8 +15,6 @@ public interface Transaction {
 
   Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row);
 
-  Put enlistDelete(HTable table, RowGroupPolicy policy, byte[] row);
-
   void rollback();
 
   void commit() throws TransactionAbortedException;

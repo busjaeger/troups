@@ -32,11 +32,6 @@ public class StringKeyLog implements
   }
 
   @Override
-  public long appendDelete(TID tid, StringKey key) throws IOException {
-    return 0;
-  }
-
-  @Override
   public void truncate(long sid) throws IOException {
   }
 

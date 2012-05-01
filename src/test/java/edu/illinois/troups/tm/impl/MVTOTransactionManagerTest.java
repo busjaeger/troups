@@ -45,6 +45,12 @@ public class MVTOTransactionManagerTest {
     tm.start();
   }
 
+  @Test
+  public void test() {
+    byte[] b = new byte[]{116, 114, 111, 117, 112, 115, 45, 108, 111, 103};
+    System.out.println(new String(b));
+  }
+  
   /**
    * scenario: transaction 0 has written version 0 to key x
    * 
@@ -163,7 +169,7 @@ public class MVTOTransactionManagerTest {
     Future<Void> f = es.submit(commit2);
 
     Thread.sleep(100);
-    tm.stop();
+    tm.stopping();
 
     try {
       f.get();

@@ -5,7 +5,6 @@ import static edu.illinois.troups.tm.TransactionState.COMMITTED;
 import static edu.illinois.troups.tm.TransactionState.FINALIZED;
 import static edu.illinois.troups.tm.TransactionState.STARTED;
 import static edu.illinois.troups.tm.mvto.TransientTransactionState.BLOCKED;
-import static edu.illinois.troups.tm.mvto.TransientTransactionState.CREATED;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -27,58 +26,34 @@ import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.log.TransactionLog;
 import edu.illinois.troups.tsm.TimestampManager;
 
-class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
+class MVTOTransaction<K extends Key> {
 
   private static final Log LOG = LogFactory.getLog(MVTOTransaction.class);
 
   // immutable state
   protected final MVTOTransactionManager<K, ?> tm;
+  protected final TID id;
+  protected final long sid;
 
   // mutable state
-  protected TID id;
-  protected long sid;
   protected int state;
   protected long lastTouched;
   private final Map<K, Long> reads;
-  private final Map<K, Boolean> writes;
+  private final Set<K> writes;
   private final Set<MVTOTransaction<K>> readFrom;
   private final Set<MVTOTransaction<K>> readBy;
 
-  public MVTOTransaction(MVTOTransactionManager<K, ?> tm) {
-    this.state = CREATED;
+  public MVTOTransaction(MVTOTransactionManager<K, ?> tm, TID tid, long sid,
+      int state) {
     this.tm = tm;
+    this.id = tid;
+    this.sid = sid;
+    this.state = state;
+    this.lastTouched = System.currentTimeMillis();
     this.reads = new HashMap<K, Long>();
-    this.writes = new HashMap<K, Boolean>();
+    this.writes = new HashSet<K>();
     this.readFrom = new HashSet<MVTOTransaction<K>>(0);
     this.readBy = new HashSet<MVTOTransaction<K>>(0);
-  }
-
-  public final synchronized void begin() throws IOException {
-    if (!shouldBegin())
-      return;
-    long before = System.currentTimeMillis();
-    long ts = getTimestampManager().acquire();
-    tm.timestampTime(System.currentTimeMillis() - before);
-    TID id = new TID(ts);
-    long sid = getTransactionLog().appendStateTransition(id, STARTED);
-    setStarted(id, sid);
-  }
-
-  protected boolean shouldBegin() {
-    switch (state) {
-    case CREATED:
-      return true;
-    default:
-      throw newISA("begin");
-    }
-  }
-
-  // in-memory state transition
-  protected void setStarted(TID id, long sid) {
-    this.lastTouched = System.currentTimeMillis();
-    this.id = id;
-    this.sid = sid;
-    this.state = STARTED;
   }
 
   public final synchronized void commit() throws TransactionAbortedException,
@@ -194,14 +169,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     // note: doing this up-front to unblock as quickly as possible
     notifyReadBy();
 
-    /*
-     * permanently remove all rows deleted by this transaction so we don't have
-     * to continue to filter them after the TA is done
-     */
-    for (Entry<K, Boolean> write : writes.entrySet())
-      if (write.getValue())
-        tm.getKeyValueStore().deleteVersions(write.getKey(), id.getTS());
-
     // logging once is sufficient, since delete operation idempotent
     releaseTimestamp();
     getTransactionLog().appendStateTransition(id, FINALIZED);
@@ -213,7 +180,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     this.lastTouched = System.currentTimeMillis();
     notifyReadBy();
     state = FINALIZED;
-    tm.addActiveReader(this);
   }
 
   private synchronized void finalizeAbort() throws IOException {
@@ -228,14 +194,9 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     }
 
     // remove any writes in progress and clean up data store
-    for (Iterator<K> it = writes.keySet().iterator(); it.hasNext();) {
+    for (Iterator<K> it = writes.iterator(); it.hasNext();) {
       K key = it.next();
-      tm.lock(key);
-      try {
-        tm.removeActiveWriter(key, this);
-      } finally {
-        tm.unlock(key);
-      }
+      tm.removeActiveWriter(key, this);
       tm.getKeyValueStore().deleteVersion(key, id.getTS());
       it.remove();
     }
@@ -249,7 +210,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   protected void setAbortFinalized() {
     this.lastTouched = System.currentTimeMillis();
     state = FINALIZED;
-    tm.addActiveReader(this);
   }
 
   protected void releaseTimestamp() throws IOException {
@@ -260,7 +220,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
 
   public final synchronized void beforeGet(Iterable<? extends K> keys) {
     checkRunning();
-    tm.addActiveReader(this);
   }
 
   /**
@@ -274,70 +233,71 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
    *          versions and all for the same row.
    * @throws TransactionAbortedException
    */
-  public final synchronized void afterGet(Iterable<? extends KeyVersions<K>> kvs)
+  public final void afterGet(Iterable<? extends KeyVersions<K>> kvs)
       throws IOException {
-    checkRunning();
-    tm.removeActiveReader(this);
     for (KeyVersions<K> kv : kvs) {
       K key = kv.getKey();
-      tm.lock(key);
+      tm.readLock(key);
       try {
-        for (Iterator<Long> it = kv.getVersions().iterator(); it.hasNext();) {
-          long version = it.next();
+        synchronized (this) {
+          checkRunning();
+          for (Iterator<Long> it = kv.getVersions().iterator(); it.hasNext();) {
+            long version = it.next();
 
-          /*
-           * 1. filter out aborted and deleted versions
-           */
-          MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
-          // if we don't have the writer, assume it is has been GC'ed
-          if (writer != null) {
-            synchronized (writer) {
-              switch (writer.state) {
-              case CREATED:
-                throw new IllegalStateException();
-              case ABORTED:
-                it.remove();
-                continue;
-              default:
-                break;
+            /*
+             * 1. filter out aborted and deleted versions
+             */
+            MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
+            // if we don't have the writer, assume it is has been GC'ed
+            if (writer != null) {
+              synchronized (writer) {
+                switch (writer.state) {
+                case ABORTED:
+                  it.remove();
+                  continue;
+                default:
+                  break;
+                }
               }
             }
-            // if the version read is a delete, remove it from the result set
-            if (writer.hasDeleted(key))
-              it.remove();
-          }
 
-          /*
-           * 2. Check if we have admitted a writer that started before this
-           * transaction but whose version is not in the result set. If that's
-           * the case, we cannot let this reader proceed, because reading an
-           * older version would violate the serialization order (if this
-           * transaction had already read the older value, the writer would have
-           * never been admitted)
-           */
-          NavigableSet<MVTOTransaction<K>> writes = tm.getActiveWriters(key);
-          if (writes != null) {
-            MVTOTransaction<K> lastWrite = writes.lower(this);
-            if (lastWrite != null
-                && tm.getTimestampManager().compare(lastWrite.id.getTS(),
-                    version) > 0) {
-              abort();
-              throw new TransactionAbortedException("Read conflict");
+            /*
+             * 2. Check if we have admitted a writer that started before this
+             * transaction but whose version is not in the result set. If that's
+             * the case, we cannot let this reader proceed, because reading an
+             * older version would violate the serialization order (if this
+             * transaction had already read the older value, the writer would
+             * have never been admitted)
+             */
+            NavigableSet<MVTOTransaction<K>> writes = tm.getActiveWriters(key);
+            if (writes != null) {
+              MVTOTransaction<K> lastWrite = writes.lower(this);
+              if (lastWrite != null
+                  && tm.getTimestampManager().compare(lastWrite.id.getTS(),
+                      version) > 0) {
+                tm.readUnlock(key);
+                abort();
+                throw new TransactionAbortedException("Read conflict");
+              }
             }
-          }
 
-          // 3. remember read for conflict detection
-          getTransactionLog().appendGet(id, key, version);
-          addGet(key, version);
+            // 3. remember read for conflict detection
+            getTransactionLog().appendGet(id, key, version);
+            addGet(key, version);
 
-          // 4. remove all older versions from result set
-          while (it.hasNext()) {
-            it.next();
-            it.remove();
+            // 4. remove all older versions from result set
+            while (it.hasNext()) {
+              it.next();
+              it.remove();
+            }
           }
         }
       } finally {
-        tm.unlock(key);
+        try {
+          tm.readUnlock(key);
+        } catch (IllegalMonitorStateException e) {
+          // ignore
+        }
       }
     }
   }
@@ -355,107 +315,81 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     tm.addReader(key, version, this);
   }
 
-  public final synchronized void failedGet(Iterable<? extends K> keys,
-      Throwable t) {
+  public final void failedGet(Iterable<? extends K> keys, Throwable t) {
     checkRunning();
-    tm.removeActiveReader(this);
   }
 
-  public final synchronized void beforePut(Iterable<? extends K> keys)
-      throws IOException {
-    beforeMutation(false, keys);
-  }
-
-  public final synchronized void afterPut(Iterable<? extends K> keys)
-      throws IOException {
-    afterMutation(false, keys);
-  }
-
-  public final synchronized void failedPut(Iterable<? extends K> keys,
-      Throwable t) throws IOException {
-    afterMutation(false, keys);
-  }
-
-  public final synchronized void beforeDelete(Iterable<? extends K> keys)
-      throws IOException {
-    beforeMutation(true, keys);
-  }
-
-  public final synchronized void afterDelete(Iterable<? extends K> keys)
-      throws IOException {
-    afterMutation(true, keys);
-  }
-
-  public final synchronized void failedDelete(Iterable<? extends K> keys,
-      Throwable t) throws IOException {
-    failedMutation(true, keys);
-  }
-
-  private void beforeMutation(boolean isDelete, Iterable<? extends K> keys)
-      throws IOException {
-    checkRunning();
+  public final void beforePut(Iterable<? extends K> keys) throws IOException {
     for (K key : keys) {
-      tm.lock(key);
-      try {
-        // enforce proper time-stamp ordering: abort transaction if needed
-        NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = tm
-            .getReaders(key);
-        if (versions != null) {
-          // reduce to versions that were written before this TA started
-          for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
-              id.getTS(), false).values()) {
-            // check if any version has been read by a TA that started after
-            // this TA
-            MVTOTransaction<K> reader = readers.higher(this);
-            if (reader != null) {
-              abort();
-              throw new TransactionAbortedException("Transaction " + id
-                  + " write conflict with " + reader.id);
+      tm.writeLock(key);
+      synchronized (this) {
+        checkRunning();
+        try {
+          // enforce proper time-stamp ordering: abort transaction if needed
+          NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = tm
+              .getReaders(key);
+          if (versions != null) {
+            // reduce to versions that were written before this TA started
+            for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
+                id.getTS(), false).values()) {
+              // check if any version has been read by a TA that started after
+              // this TA
+              MVTOTransaction<K> reader = readers.higher(this);
+              if (reader != null) {
+                tm.writeUnlock(key);
+                abort();
+                throw new TransactionAbortedException("Transaction " + id
+                    + " write conflict with " + reader.id);
+              }
             }
           }
-        }
 
-        /*
-         * record write so we can clean it up if the TA aborts. If it is a
-         * delete, we also use this information to filter deleted versions from
-         * reads results and to delete values from the underlying data store
-         * when the transaction commits
-         */
-        if (isDelete)
-          getTransactionLog().appendDelete(id, key);
-        else
+          /*
+           * record write so we can clean it up if the TA aborts. If it is a
+           * delete, we also use this information to filter deleted versions
+           * from reads results and to delete values from the underlying data
+           * store when the transaction commits
+           */
           getTransactionLog().appendPut(id, key);
-        /*
-         * Add write in progress, so readers can check if they see the version
-         */
-        tm.addActiveWriter(key, this);
-        addMutation(key, isDelete);
-      } finally {
-        tm.unlock(key);
+          /*
+           * Add write in progress, so readers can check if they see the version
+           */
+          tm.addActiveWriter(key, this);
+          addWrite(key);
+        } finally {
+          try {
+            tm.writeUnlock(key);
+          } catch (IllegalMonitorStateException e) {
+            // ignore
+          }
+        }
       }
     }
+  }
+
+  public final void afterPut(Iterable<? extends K> keys) throws IOException {
+    for (K key : keys) {
+      tm.writeLock(key);
+      try {
+        synchronized (this) {
+          checkRunning();
+          tm.removeActiveWriter(key, this);
+        }
+      } finally {
+        tm.writeUnlock(key);
+      }
+    }
+  }
+
+  public final void failedPut(Iterable<? extends K> keys, Throwable t)
+      throws IOException {
+    afterPut(keys);
   }
 
   // in-memory state transition
-  protected void addMutation(K key, boolean isDelete) {
+  protected void addWrite(K key) {
     this.lastTouched = System.currentTimeMillis();
-    writes.put(key, isDelete);
-  }
-
-  private void afterMutation(boolean isDelete, Iterable<? extends K> keys) {
-    checkRunning();
-    for (K key : keys) {
-      tm.lock(key);
-      try {
-        tm.removeActiveWriter(key, this);
-      } finally {
-        tm.unlock(key);
-      }
-    }
-  }
-
-  private void failedMutation(boolean isDelete, Iterable<? extends K> keys) {
-    afterMutation(isDelete, keys);
+    writes.add(key);
   }
 
   // ----------------------------------------------------------------------
@@ -480,15 +414,11 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
     return tm.getTimestampManager();
   }
 
-  synchronized TID getID() {
-    if (state == CREATED)
-      throw newISA("getID");
+  TID getID() {
     return this.id;
   }
 
-  synchronized long getSID() {
-    if (state == CREATED)
-      throw newISA("getSID");
+  long getSID() {
     return this.sid;
   }
 
@@ -517,7 +447,6 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
       case BLOCKED:
         break;
       case COMMITTED:
-      case CREATED:
       case FINALIZED:
         // 3. we should never get into one of these states
         throw newISA("doCommit");
@@ -541,49 +470,25 @@ class MVTOTransaction<K extends Key> implements Comparable<MVTOTransaction<K>> {
   synchronized void removeReads() {
     for (Entry<K, Long> read : reads.entrySet()) {
       K key = read.getKey();
-      tm.lock(key);
-      try {
-        tm.removeReader(key, read.getValue(), this);
-      } finally {
-        tm.unlock(key);
-      }
+      tm.removeReader(key, read.getValue(), this);
     }
-  }
-
-  private boolean hasDeleted(K key) {
-    return Boolean.TRUE == writes.get(key);
   }
 
   IllegalStateException newISA(String op) {
     return new IllegalStateException("Cannot " + op + " Transaction: " + this);
   }
 
-  @Override
-  public int compareTo(MVTOTransaction<K> ta) {
-    if (id == null)
-      throw new IllegalStateException("no id");
-    if (ta.id == null)
-      throw new IllegalArgumentException("no ta id");
-    return id.compareTo(ta.id);
-  }
-
   @SuppressWarnings("unchecked")
   @Override
   public boolean equals(Object obj) {
-    if (id == null)
-      throw new IllegalStateException("no id");
     if (!(obj instanceof MVTOTransaction))
       return false;
     MVTOTransaction<K> ota = (MVTOTransaction<K>) obj;
-    if (ota.id == null)
-      throw new IllegalArgumentException("no ta id");
     return id.equals(ota.id);
   }
 
   @Override
   public int hashCode() {
-    if (id == null)
-      throw new IllegalStateException("no id");
     return id.hashCode();
   }
 

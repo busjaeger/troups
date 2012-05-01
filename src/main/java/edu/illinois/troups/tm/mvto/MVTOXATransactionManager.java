@@ -1,5 +1,6 @@
 package edu.illinois.troups.tm.mvto;
 
+import static edu.illinois.troups.tm.TransactionState.FINALIZED;
 import static edu.illinois.troups.tm.XATransactionState.JOINED;
 import static edu.illinois.troups.tm.XATransactionState.PREPARED;
 import static edu.illinois.troups.tm.log.XATransactionLog.RECORD_TYPE_XA_STATE_TRANSITION;
@@ -13,11 +14,11 @@ import org.apache.commons.logging.LogFactory;
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyValueStore;
 import edu.illinois.troups.tm.TID;
-import edu.illinois.troups.tm.log.XATransactionLog;
-import edu.illinois.troups.tm.log.TransactionLog.Record;
-import edu.illinois.troups.tm.log.XATransactionLog.XAStateTransitionRecord;
 import edu.illinois.troups.tm.XATransactionManager;
 import edu.illinois.troups.tm.XID;
+import edu.illinois.troups.tm.log.TransactionLog.Record;
+import edu.illinois.troups.tm.log.XATransactionLog;
+import edu.illinois.troups.tm.log.XATransactionLog.XAStateTransitionRecord;
 import edu.illinois.troups.tsm.NoSuchTimestampException;
 import edu.illinois.troups.tsm.SharedTimestampManager;
 
@@ -44,19 +45,40 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
   }
 
   @Override
-  public synchronized XID join(final TID tid) throws IOException {
+  public XID join(final TID tid) throws IOException {
     runLock.readLock().lock();
     try {
       checkRunning();
       reclaimLock.readLock().lock();
       try {
-        // if the transaction is reclaimed, don't allow it in
-        if (timestampManager.compare(tid.getTS(), reclaimed) < 0)
-          throw new IllegalArgumentException("Already reclaimed " + tid);
-        MVTOXATransaction<K> ta = new MVTOXATransaction<K>(this);
-        ta.join(tid);
-        addTransaction(ta);
-        return ta.getID();
+        long ts = tid.getTS();
+        // only allow in timestamps that have not been relcaimed: otherwise we
+        // may not be able to implement the concurrency protocol correctly in
+        // case we already discarded transactions that follow this one
+        if (timestampManager.compare(ts, reclaimed) < 0)
+          throw new IllegalStateException("Already reclaimed " + tid);
+
+        long pid;
+        try {
+          pid = getTimestampManager().acquireReference(ts);
+        } catch (NoSuchTimestampException e) {
+          throw new IllegalStateException("Timestamp already reclaimed", e);
+        }
+
+        XID xid = new XID(ts, pid);
+        int state = JOINED;
+        long sid = getTransactionLog().appendXAStateTransition(xid, state);
+
+        // do not support joining the same transaction twice
+        MVTOXATransaction<K> ta = new MVTOXATransaction<K>(this, xid, sid,
+            JOINED);
+        if (transactions.putIfAbsent(xid, ta) != null) {
+          getTimestampManager().releaseReference(ts, pid);
+          getTransactionLog().appendStateTransition(xid, FINALIZED);
+          throw new IllegalStateException("Transaction already running " + tid);
+        }
+
+        return xid;
       } finally {
         reclaimLock.readLock().unlock();
       }
@@ -72,7 +94,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
         if (!(ta instanceof MVTOXATransaction))
           throw new IllegalStateException("Cannot prepare non XA transaction");
         ((MVTOXATransaction<K>) ta).prepare();
-        System.out.println("Prepared " + xid);
+        LOG.debug("Prepared " + ta);
       }
     }.run(xid);
   }
@@ -106,6 +128,14 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
     case RECORD_TYPE_XA_STATE_TRANSITION:
       XAStateTransitionRecord<K> stlr = (XAStateTransitionRecord<K>) record;
       switch (stlr.getTransactionState()) {
+      case JOINED: {
+        if (ta != null)
+          throw new IllegalStateException(
+              "join record for existing transaction");
+        XID xid = stlr.getTID();
+        transactions.put(xid, new MVTOXATransaction<K>(this, xid, sid, JOINED));
+        return;
+      }
       case PREPARED: {
         if (ta == null)
           return;
@@ -114,15 +144,6 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
               "prepare log record for non-XA transaction");
         MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
         xta.setPrepared();
-        return;
-      }
-      case JOINED: {
-        if (ta != null)
-          throw new IllegalStateException(
-              "join record for existing transaction");
-        MVTOXATransaction<K> xta = new MVTOXATransaction<K>(this);
-        xta.setJoined((XID) record.getTID(), sid);
-        addTransaction(ta);
         return;
       }
       }

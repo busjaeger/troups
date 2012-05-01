@@ -14,7 +14,6 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
   public static final int RECORD_TYPE_STATE_TRANSITION = 1;
   public static final int RECORD_TYPE_GET = 2;
   public static final int RECORD_TYPE_PUT = 3;
-  public static final int RECORD_TYPE_DELETE = 4;
 
   public interface Record<K extends Key> {
 
@@ -58,10 +57,6 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
     // marker interface
   }
 
-  public interface DeleteRecord<K extends Key> extends OperationRecord<K> {
-    // marker interface
-  }
-
   public interface GetRecord<K extends Key> extends OperationRecord<K> {
     /**
      * version read
@@ -76,8 +71,6 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
   public long appendGet(TID tid, K key, long version) throws IOException;
 
   public long appendPut(TID tid, K key) throws IOException;
-
-  public long appendDelete(TID tid, K key) throws IOException;
 
   public abstract void truncate(long sid) throws IOException;
 
