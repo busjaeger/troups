@@ -11,11 +11,13 @@ import org.apache.hadoop.io.WritableUtils;
 import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.TID;
+import edu.illinois.troups.tm.TransactionAbortedException;
 
 public abstract class AbstractTransaction implements Transaction {
 
   @Override
-  public Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row) {
+  public Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row)
+      throws TransactionAbortedException {
     TID tid = getTID(table, policy, row);
     Get get = new Get(row);
     try {
@@ -29,7 +31,8 @@ public abstract class AbstractTransaction implements Transaction {
   }
 
   @Override
-  public Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row) {
+  public Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row)
+      throws TransactionAbortedException {
     TID tid = getTID(table, policy, row);
     Put put = new Put(row, tid.getTS());
     setTID(put, tid);
@@ -41,7 +44,8 @@ public abstract class AbstractTransaction implements Transaction {
     operation.setAttribute(getTIDAttr(), tsBytes);
   }
 
-  protected abstract TID getTID(HTable table, RowGroupPolicy policy, byte[] row);
+  protected abstract TID getTID(HTable table, RowGroupPolicy policy, byte[] row)
+      throws TransactionAbortedException;
 
   protected abstract String getTIDAttr();
 

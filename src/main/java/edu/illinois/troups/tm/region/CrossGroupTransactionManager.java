@@ -14,7 +14,16 @@ public interface CrossGroupTransactionManager<K extends Key> extends
 
   public static final long VERSION = 1L;
 
-  XID join(K groupKey, TID tid) throws IOException;
+  /**
+   * 
+   * @param groupKey
+   * @param tid
+   * @return
+   * @throws TransactionAbortedException
+   *           if the transaction is a straggler and was denied entry
+   * @throws IOException
+   */
+  XID join(K groupKey, TID tid) throws TransactionAbortedException, IOException;
 
   void prepare(K groupKey, XID xid) throws TransactionAbortedException,
       IOException;

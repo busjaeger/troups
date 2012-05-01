@@ -7,9 +7,11 @@ import static edu.illinois.troups.tm.TransactionState.STARTED;
 import static edu.illinois.troups.tm.mvto.TransientTransactionState.BLOCKED;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
@@ -18,6 +20,9 @@ import java.util.Set;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+
+import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
 
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyVersions;
@@ -119,8 +124,8 @@ class MVTOTransaction<K extends Key> {
     long current = System.currentTimeMillis();
     if (isRunning() && current > lastTouched
         && (lastTouched + timeout) < current) {
-      LOG.warn("Aborting transaction " + this + " lastTouched " + lastTouched
-          + " at " + current);
+      LOG.warn("Aborting timed out transaction " + this + "(last accessed: "
+          + lastTouched + ", current: " + current + ")");
       abort();
     }
   }
@@ -234,7 +239,30 @@ class MVTOTransaction<K extends Key> {
    * @throws TransactionAbortedException
    */
   public final void afterGet(Iterable<? extends KeyVersions<K>> kvs)
-      throws IOException {
+      throws TransactionAbortedException, IOException {
+    Iterables.transform(kvs, KeyVersions.getKey); new Function<KeyVersions<K>, K>() {
+      @Override
+      public K apply(KeyVersions<K> input) {
+        return input.getKey();
+      }
+    });
+
+    List<K> lockedKeys = new ArrayList<K>();
+    for (KeyVersions<K> kv : kvs) {
+      K key = kv.getKey();
+      tm.readLock(key);
+      lockedKeys.add(key);
+    }
+    try {
+      synchronized (this) {
+        checkRunning();
+        
+      }
+    } finally {
+      for (K key: lockedKeys)
+        tm.readUnlock(key);
+    }
+
     for (KeyVersions<K> kv : kvs) {
       K key = kv.getKey();
       tm.readLock(key);

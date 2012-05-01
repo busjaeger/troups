@@ -93,14 +93,16 @@ public class SingleRowTransactions {
           gett += (now - beforeOp);
         }
 
-        beforeOp = now;
-        try {
-          Put put = new Put(row);
-          put.add(familyName, qualifierName, new byte[1024]);
-          table.put(ta, put);
-        } finally {
-          now = System.currentTimeMillis();
-          putt += (now - beforeOp);
+        if (i % 20 == 0) {
+          beforeOp = now;
+          try {
+            Put put = new Put(row);
+            put.add(familyName, qualifierName, new byte[1024]);
+            table.put(ta, put);
+          } finally {
+            now = System.currentTimeMillis();
+            putt += (now - beforeOp);
+          }
         }
 
         beforeCommit = now;

@@ -10,9 +10,11 @@ import static edu.illinois.troups.tm.log.TransactionLog.RECORD_TYPE_STATE_TRANSI
 import static edu.illinois.troups.tm.mvto.TransientTransactionState.BLOCKED;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
@@ -221,7 +223,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       running = true;
       closing = false;
     } catch (IOException e) {
-      throw new IllegalStateException(e);
+      throw new IllegalStateException("Failed to start transaction manager", e);
     } finally {
       runLock.writeLock().unlock();
     }
@@ -388,11 +390,10 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   public void commit(final TID tid) throws IOException {
     new IfRunning() {
       void execute(MVTOTransaction<K> ta) throws IOException {
+        // clients can retry
         if (closing)
-          throw new IllegalStateException(
-              "Cannot accept new commits while closing");
+          throw new IOException("Transaction Manager closing");
         ta.commit();
-        System.out.println("Committed " + tid);
       }
     }.run(tid);
   }
@@ -402,7 +403,6 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     new IfRunning() {
       void execute(MVTOTransaction<K> ta) throws IOException {
         ta.abort();
-        System.out.println("Aborted " + tid);
       }
     }.run(tid);
   }
@@ -451,17 +451,32 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }
   }
 
-  void checkRunning() {
+  void checkRunning() throws IOException {
     runLock.readLock().lock();
     try {
+      // clients can retry
       if (!running)
-        throw new IllegalStateException("Transaction Manager stopped");
+        throw new IOException("Transaction Manager not running");
     } finally {
       runLock.readLock().unlock();
     }
   }
 
-  void readLock(Key key) {
+  List<K> readLock(Iterable<K> keys) {
+    List<K> locked = new ArrayList<K>();
+    for (K key : keys) {
+      readLock(key);
+      locked.add(key);
+    }
+    return locked;
+  }
+
+  void readUnlock(Iterable<K> keys) {
+    for (K key: keys)
+      readUnlock(key);
+  }
+
+  void readLock(K key) {
     ReentrantReadWriteLock lock = keyLocks.get(key);
     if (lock == null) {
       lock = new ReentrantReadWriteLock();
@@ -473,13 +488,13 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   }
 
   // TODO figure out how to remove key locks safely
-  void readUnlock(Key key) {
+  void readUnlock(K key) {
     ReentrantReadWriteLock lock = keyLocks.get(key);
     if (lock != null)
       lock.readLock().unlock();
   }
 
-  void writeLock(Key key) {
+  void writeLock(K key) {
     ReentrantReadWriteLock lock = keyLocks.get(key);
     if (lock == null) {
       lock = new ReentrantReadWriteLock();
@@ -491,7 +506,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   }
 
   // TODO figure out how to remove key locks safely
-  void writeUnlock(Key key) {
+  void writeUnlock(K key) {
     ReentrantReadWriteLock lock = keyLocks.get(key);
     if (lock != null)
       lock.writeLock().unlock();

@@ -484,7 +484,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     };
   }
 
-  // TODO make more general - written with assumptions about how it's used
   static Iterable<KeyVersions<HKey>> transform(final Iterable<KeyValue> kvs) {
     return new Iterable<KeyVersions<HKey>>() {
       @Override
@@ -492,26 +491,43 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         return new Iterator<KeyVersions<HKey>>() {
           private final Iterator<KeyValue> it = kvs.iterator();
 
+          private KeyValue current;
           private KeyValue next;
+
+          private boolean advanceNext() {
+            while (it.hasNext()) {
+              next = it.next();
+              if (COMP.compare(next, current) != 0)
+                return true;
+            }
+            next = null;
+            return false;
+          }
 
           @Override
           public boolean hasNext() {
-            return next != null || it.hasNext();
+            if (current == null)
+              return it.hasNext();
+            if (next == null)
+              return false;
+            if (current == next)
+              return advanceNext();
+            return true;
           }
 
           @Override
           public KeyVersions<HKey> next() {
-            final KeyValue first;
-            if (next == null)
-              first = it.next();
-            else {
-              first = next;
-              next = null;
-            }
+            if (current == null)
+              next = it.next();
+            else if (next == null)
+              throw new NoSuchElementException();
+            else if (current == next && !advanceNext())
+              throw new NoSuchElementException();
+            current = next;
             return new KeyVersions<HKey>() {
               @Override
               public HKey getKey() {
-                return new HKey(first);
+                return new HKey(current.getKey());
               }
 
               @Override
@@ -520,37 +536,43 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                   @Override
                   public Iterator<Long> iterator() {
                     return new Iterator<Long>() {
-                      boolean isFirst = true;
+                      private KeyValue currentVersion;
+                      private KeyValue nextVersion;
+
+                      private boolean advanceNext() {
+                        if (it.hasNext()) {
+                          nextVersion = it.next();
+                          if (COMP.compare(current, nextVersion) == 0)
+                            return true;
+                          next = nextVersion;
+                        }
+                        return false;
+                      }
 
                       @Override
                       public boolean hasNext() {
-                        if (isFirst)
+                        if (currentVersion == null)
                           return true;
-                        if (!it.hasNext())
-                          return false;
-                        if (next == null)
-                          next = it.next();
-                        if (COMP.compare(next, first) != 0)
+                        if (currentVersion == nextVersion)
+                          return advanceNext();
+                        if (next == nextVersion)
                           return false;
                         return true;
                       }
 
                       @Override
                       public Long next() {
-                        long ts;
-                        if (isFirst) {
-                          ts = first.getTimestamp();
-                          isFirst = false;
-                        } else {
-                          if (next == null) {
-                            next = it.next();
-                            if (COMP.compare(next, first) != 0)
-                              throw new NoSuchElementException();
-                          }
-                          ts = next.getTimestamp();
-                          next = null;
-                        }
-                        return ts;
+                        if (currentVersion == null) {
+                          currentVersion = current;
+                          nextVersion = current;
+                        } else if (nextVersion == next)
+                          throw new NoSuchElementException();
+                        else if (currentVersion == nextVersion)
+                          advanceNext();
+                        // else current version before next version
+                        long version = currentVersion.getTimestamp();
+                        currentVersion = nextVersion;
+                        return version;
                       }
 
                       @Override

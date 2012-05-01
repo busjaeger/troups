@@ -65,7 +65,7 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
 
   @Override
   protected synchronized XID getTID(HTable table, RowGroupPolicy policy,
-      byte[] row) {
+      byte[] row) throws TransactionAbortedException {
     switch (state) {
     case ACTIVE:
       break;
@@ -87,6 +87,8 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
     if (xid == null) {
       try {
         xid = getRTM(group).join(new HKey(row), id);
+      } catch (TransactionAbortedException e) {
+        throw e;
       } catch (IOException e) {
         rollback();
         throw new RuntimeException(e);

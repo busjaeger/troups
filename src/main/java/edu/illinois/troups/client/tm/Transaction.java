@@ -11,9 +11,11 @@ import edu.illinois.troups.tm.TransactionAbortedException;
  */
 public interface Transaction {
 
-  Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row);
+  Put enlistPut(HTable table, RowGroupPolicy policy, byte[] row)
+      throws TransactionAbortedException;
 
-  Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row);
+  Get enlistGet(HTable table, RowGroupPolicy policy, byte[] row)
+      throws TransactionAbortedException;
 
   void rollback();
 

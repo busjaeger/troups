@@ -14,6 +14,7 @@ import org.apache.commons.logging.LogFactory;
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyValueStore;
 import edu.illinois.troups.tm.TID;
+import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.XATransactionManager;
 import edu.illinois.troups.tm.XID;
 import edu.illinois.troups.tm.log.TransactionLog.Record;
@@ -56,13 +57,13 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
         // may not be able to implement the concurrency protocol correctly in
         // case we already discarded transactions that follow this one
         if (timestampManager.compare(ts, reclaimed) < 0)
-          throw new IllegalStateException("Already reclaimed " + tid);
+          throw new TransactionAbortedException("Already reclaimed " + tid);
 
         long pid;
         try {
           pid = getTimestampManager().acquireReference(ts);
         } catch (NoSuchTimestampException e) {
-          throw new IllegalStateException("Timestamp already reclaimed", e);
+          throw new TransactionAbortedException("Already reclaimed " + tid, e);
         }
 
         XID xid = new XID(ts, pid);
@@ -75,7 +76,8 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
         if (transactions.putIfAbsent(xid, ta) != null) {
           getTimestampManager().releaseReference(ts, pid);
           getTransactionLog().appendStateTransition(xid, FINALIZED);
-          throw new IllegalStateException("Transaction already running " + tid);
+          throw new TransactionAbortedException("Branch for transaction " + tid
+              + " already running");
         }
 
         return xid;
@@ -92,7 +94,7 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
     new IfRunning() {
       void execute(MVTOTransaction<K> ta) throws IOException {
         if (!(ta instanceof MVTOXATransaction))
-          throw new IllegalStateException("Cannot prepare non XA transaction");
+          throw new IllegalStateException("Prepare for non XA transaction");
         ((MVTOXATransaction<K>) ta).prepare();
         LOG.debug("Prepared " + ta);
       }
@@ -105,9 +107,9 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
       new IfRunning() {
         @Override
         void execute(MVTOTransaction<K> ta) throws IOException {
-          MVTOXATransaction<K> xta = (MVTOXATransaction<K>) ta;
-          xta.setPrepared();
-          xta.commit();
+          if (ta instanceof MVTOXATransaction)
+            ((MVTOXATransaction<K>) ta).setPrepared();
+          ta.commit();
         }
       }.run(xid);
     } else {

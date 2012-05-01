@@ -10,6 +10,7 @@ import java.util.List;
 import junit.framework.Assert;
 
 import org.apache.hadoop.hbase.KeyValue;
+import org.junit.Before;
 import org.junit.Test;
 
 import edu.illinois.troups.tm.KeyVersions;
@@ -18,8 +19,10 @@ import edu.illinois.troups.tm.region.HRegionTransactionManager;
 
 public class HRegionTransactionManagerTest {
 
-  @Test
-  public void testTransform() {
+  List<KeyValue> kvs;
+
+  @Before
+  public void before() {
     byte[] row = toBytes("r1");
     byte[][] families = new byte[][] { toBytes("cf1"), toBytes("cf2") };
     byte[][] qualifiers = new byte[][] { toBytes("q1"), toBytes("q2") };
@@ -27,7 +30,7 @@ public class HRegionTransactionManagerTest {
     byte[][] values = new byte[][] { toBytes("v1"), toBytes("v2") };
 
     int i = 0;
-    List<KeyValue> kvs = new ArrayList<KeyValue>();
+    kvs = new ArrayList<KeyValue>();
     for (byte[] family : families)
       for (byte[] qualifier : qualifiers)
         for (long timestamp : timestamps)
@@ -35,7 +38,22 @@ public class HRegionTransactionManagerTest {
               values[(i += 3) % 2]));
 
     Collections.sort(kvs, KeyValue.COMPARATOR);
+  }
 
+  @Test
+  public void testKeyIterator() {
+    Iterable<KeyVersions<HKey>> versions = HRegionTransactionManager
+        .transform(kvs);
+    int i = 0;
+    for (KeyVersions<HKey> kvs : versions) {
+      kvs.getKey();
+      i++;
+    }
+    Assert.assertEquals(4, i);
+  }
+
+  @Test
+  public void testVersionIterator() {
     Iterable<KeyVersions<HKey>> versions = HRegionTransactionManager
         .transform(kvs);
     for (KeyVersions<HKey> kv : versions) {
@@ -47,10 +65,15 @@ public class HRegionTransactionManagerTest {
         }
       }
     }
-
     for (KeyVersions<HKey> vs : versions)
       for (Long version : vs.getVersions())
         Assert.assertEquals(Long.valueOf(2L), version);
     Assert.assertEquals(4, kvs.size());
+  }
+
+  @Test
+  public void testBoth() {
+    testKeyIterator();
+    testVersionIterator();
   }
 }

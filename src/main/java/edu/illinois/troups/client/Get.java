@@ -8,8 +8,8 @@ import java.util.TreeSet;
 import org.apache.hadoop.hbase.util.Bytes;
 
 /**
- * Like HBase's Put, but restricted to operations troups supports. In particular,
- * no time-stamp support.
+ * Like HBase's Put, but restricted to operations troups supports. In
+ * particular, no time-stamp support.
  */
 public class Get {
 
