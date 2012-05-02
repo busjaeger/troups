@@ -1,6 +1,7 @@
 package edu.illinois.troups.tm.region.log;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -53,14 +54,14 @@ public class HGroupTransactionLog implements TransactionLog<HKey, HRecord> {
   }
 
   @Override
-  public long appendGet(TID tid, HKey key, long version) throws IOException {
-    HRecord record = new HGetRecord(tid, key, version);
+  public long appendGet(TID tid, List<HKey> keys, List<Long> versions) throws IOException {
+    HRecord record = new HGetRecord(tid, keys, versions);
     return append(groupKey, record);
   }
 
   @Override
-  public long appendPut(TID tid, HKey key) throws IOException {
-    HRecord record = new HPutRecord(tid, key);
+  public long appendPut(TID tid, List<HKey> keys) throws IOException {
+    HRecord record = new HPutRecord(tid, keys);
     return append(groupKey, record);
   }
 

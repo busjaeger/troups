@@ -123,8 +123,8 @@ public class SingleRowTransactions {
         tt += (now - before);
       }
 
-      if (i != 0 && i % 100 == 0)
-        System.out.println("100 times");
+      if (i != 0 && i % 10 == 0)
+        System.out.println("10 times");
     }
 
     System.out.println("Average total: " + (tt / num));

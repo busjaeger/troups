@@ -10,16 +10,12 @@ import static edu.illinois.troups.tm.log.TransactionLog.RECORD_TYPE_STATE_TRANSI
 import static edu.illinois.troups.tm.mvto.TransientTransactionState.BLOCKED;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
-import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -135,9 +131,9 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   // transactions by transaction ID for efficient direct lookup
   protected final ConcurrentNavigableMap<TID, MVTOTransaction<K>> transactions;
   // TAs indexed by key and versions read for efficient conflict detection
-  protected final Map<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> readers;
+  protected final ConcurrentMap<K, ConcurrentNavigableMap<Long, NavigableSet<MVTOTransaction<K>>>> reads;
   // TAs indexed by key currently being written for efficient conflict detection
-  protected final Map<K, NavigableSet<MVTOTransaction<K>>> activeWriters;
+  protected final ConcurrentMap<K, NavigableSet<MVTOTransaction<K>>> activeWriters;
   // lock protect the previous two conflict detection data structures
   protected final ConcurrentMap<Key, ReentrantReadWriteLock> keyLocks;
   // flag to indicate whether TA is closing
@@ -168,8 +164,8 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
 
     this.transactions = new ConcurrentSkipListMap<TID, MVTOTransaction<K>>(
         tidComparator);
-    this.readers = new HashMap<K, NavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
-    this.activeWriters = new HashMap<K, NavigableSet<MVTOTransaction<K>>>();
+    this.reads = new ConcurrentHashMap<K, ConcurrentNavigableMap<Long, NavigableSet<MVTOTransaction<K>>>>();
+    this.activeWriters = new ConcurrentHashMap<K, NavigableSet<MVTOTransaction<K>>>();
     this.keyLocks = new ConcurrentHashMap<Key, ReentrantReadWriteLock>();
   }
 
@@ -245,6 +241,12 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     } finally {
       runLock.readLock().unlock();
     }
+    /*
+     * can't just acquire write lock, because blocked threads hold the read
+     * lock, so we would not be able to shut down if some blocked thread is
+     * stuck. This is done in a loop, since new commits could come in between
+     * unblocking and trying to aquire the lock again.
+     */
     if (!runLock.writeLock().tryLock()) {
       while (true) {
         for (MVTOTransaction<K> ta : transactions.values())
@@ -260,6 +262,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     try {
       if (closing || !running)
         return;
+      // at this point we do not allow any more commits
       closing = true;
       LOG.info("Timestamp time " + (tNum > 0 ? tTime / tNum : 0));
     } finally {
@@ -462,18 +465,9 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }
   }
 
-  List<K> readLock(Iterable<K> keys) {
-    List<K> locked = new ArrayList<K>();
-    for (K key : keys) {
+  void readLock(Iterable<? extends K> keys) {
+    for (K key : keys)
       readLock(key);
-      locked.add(key);
-    }
-    return locked;
-  }
-
-  void readUnlock(Iterable<K> keys) {
-    for (K key: keys)
-      readUnlock(key);
   }
 
   void readLock(K key) {
@@ -487,11 +481,21 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     lock.readLock().lock();
   }
 
+  void readUnlock(Iterable<? extends K> keys) {
+    for (K key : keys)
+      readUnlock(key);
+  }
+
   // TODO figure out how to remove key locks safely
   void readUnlock(K key) {
     ReentrantReadWriteLock lock = keyLocks.get(key);
     if (lock != null)
       lock.readLock().unlock();
+  }
+
+  void writeLock(Iterable<? extends K> keys) {
+    for (K key : keys)
+      writeLock(key);
   }
 
   void writeLock(K key) {
@@ -505,6 +509,11 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     lock.writeLock().lock();
   }
 
+  void writeUnlock(Iterable<? extends K> keys) {
+    for (K key : keys)
+      writeUnlock(key);
+  }
+
   // TODO figure out how to remove key locks safely
   void writeUnlock(K key) {
     ReentrantReadWriteLock lock = keyLocks.get(key);
@@ -516,72 +525,79 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     return transactions.get(tid);
   }
 
-  void addReader(K key, long version, MVTOTransaction<K> reader) {
+  void addRead(K key, long version, MVTOTransaction<K> reader) {
+    ConcurrentNavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = reads
+        .get(key);
+    if (versions == null) {
+      versions = new ConcurrentSkipListMap<Long, NavigableSet<MVTOTransaction<K>>>();
+      ConcurrentNavigableMap<Long, NavigableSet<MVTOTransaction<K>>> existing = reads
+          .putIfAbsent(key, versions);
+      if (existing != null)
+        versions = existing;
+    }
+    NavigableSet<MVTOTransaction<K>> readers = versions.get(version);
+    if (readers == null) {
+      readers = new TreeSet<MVTOTransaction<K>>(transactionComparator);
+      NavigableSet<MVTOTransaction<K>> existing = versions.putIfAbsent(version,
+          readers);
+      if (existing != null)
+        readers = existing;
+    }
     synchronized (readers) {
-      NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = readers
-          .get(key);
-      if (versions == null) {
-        versions = new TreeMap<Long, NavigableSet<MVTOTransaction<K>>>();
-        readers.put(key, versions);
-      }
-      NavigableSet<MVTOTransaction<K>> tas = versions.get(version);
-      if (tas == null) {
-        tas = new TreeSet<MVTOTransaction<K>>(transactionComparator);
-        versions.put(version, tas);
-      }
-      tas.add(reader);
+      readers.add(reader);
     }
   }
 
   // must hold key write lock to call this method
-  NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> getReaders(K key) {
+  NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> getReads(K key) {
+    return reads.get(key);
+  }
+
+  // TODO figure out how to properly clean up empty collections
+  void removeRead(Key key, long version, MVTOTransaction<K> reader) {
+    ConcurrentNavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = reads
+        .get(key);
+    if (versions == null)
+      return;
+    NavigableSet<MVTOTransaction<K>> readers = versions.get(version);
+    if (readers == null)
+      return;
     synchronized (readers) {
-      return readers.get(key);
+      readers.remove(reader);
     }
   }
 
-  void removeReader(Key key, long version, MVTOTransaction<K> reader) {
-    synchronized (readers) {
-      NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = readers
-          .get(key);
-      if (versions == null)
-        return;
-      NavigableSet<MVTOTransaction<K>> tas = versions.get(version);
-      if (tas != null && tas.remove(reader) && tas.isEmpty()
-          && versions.remove(version) != null && versions.isEmpty())
-        readers.remove(key);
-    }
-  }
-
-  // must hold key lock to call this method
   void addActiveWriter(K key, MVTOTransaction<K> writer) {
-    synchronized (activeWriters) {
-      NavigableSet<MVTOTransaction<K>> writers = activeWriters.get(key);
-      if (writers == null) {
-        writers = new TreeSet<MVTOTransaction<K>>(transactionComparator);
-        activeWriters.put(key, writers);
-      }
-      writers.add(writer);
+    NavigableSet<MVTOTransaction<K>> tas = activeWriters.get(key);
+    if (tas == null) {
+      tas = new TreeSet<MVTOTransaction<K>>(transactionComparator);
+      NavigableSet<MVTOTransaction<K>> existing = activeWriters.putIfAbsent(
+          key, tas);
+      if (existing != null)
+        tas = existing;
+    }
+    synchronized (tas) {
+      tas.add(writer);
     }
   }
 
   // must hold key lock to call this method
   NavigableSet<MVTOTransaction<K>> getActiveWriters(K key) {
-    synchronized (activeWriters) {
-      return activeWriters.get(key);
-    }
+    return activeWriters.get(key);
   }
 
-  // must hold key lock to call this method
+  // TODO: figure out how to remove empty collections
   void removeActiveWriter(Key key, MVTOTransaction<K> writer) {
-    synchronized (activeWriters) {
-      NavigableSet<MVTOTransaction<K>> writers = activeWriters.get(key);
-      if (writers != null && writers.remove(writer) && writers.isEmpty())
-        activeWriters.remove(key);
+    NavigableSet<MVTOTransaction<K>> writers = activeWriters.get(key);
+    if (writers == null)
+      return;
+    synchronized (writers) {
+      writers.remove(writer);
     }
   }
 
-  // garbage collection
+  // TODO if the last transaction is reclaimed, we can truncate the log at the
+  // highest last sequence ID
   @Override
   public void reclaimed(long ts) {
     runLock.readLock().lock();
@@ -606,7 +622,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
             break;
           }
           // try to increment SID
-          long sid = ta.getSID();
+          long sid = ta.getFirstSID();
           if (cutoff == null || transactionLog.compare(cutoff, sid) < 0)
             cutoff = sid;
         }
@@ -620,7 +636,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
         if (cutoff != null) {
           while (it.hasNext()) {
             MVTOTransaction<K> ta = it.next();
-            long sid = ta.getSID();
+            long sid = ta.getFirstSID();
             if (transactionLog.compare(cutoff, sid) > 0)
               cutoff = sid;
           }
@@ -651,8 +667,10 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       break;
     case FINALIZED:
       /*
-       * reads can only be cleaned up once all transactions that started before
-       * this one have completed
+       * For committed transactions we can only remove the reads, i.e. no longer
+       * consider them during conflict detection once we can be sure that no
+       * transactions that started earlier are still active. Since we are asked
+       * to reclaim this transaction, this is the case now.
        */
       ta.removeReads();
       transactions.remove(ta.getID());
@@ -688,14 +706,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       case FINALIZED:
         if (ta == null)
           return;
-        switch (ta.getState()) {
-        case COMMITTED:
-          ta.setCommitFinalized();
-          break;
-        case ABORTED:
-          ta.setAbortFinalized();
-          break;
-        }
+        ta.setFinalized(sid);
         return;
       }
       return;
@@ -704,17 +715,28 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       if (ta == null)
         return;
       GetRecord<K> glr = (GetRecord<K>) record;
-      K key = glr.getKey();
-      long version = glr.getVersion();
-      ta.addGet(key, version);
+      List<K> keys = glr.getKeys();
+      List<Long> versions = glr.getVersions();
+      for (Long version : versions) {
+        MVTOTransaction<K> writer = transactions.get(version);
+        if (writer != null) {
+          switch (writer.getState()) {
+          case STARTED:
+          case BLOCKED:
+            ta.addReadFrom(writer);
+            break;
+          }
+        }
+      }
+      ta.addGets(keys, versions);
       return;
     }
     case RECORD_TYPE_PUT: {
       if (ta == null)
         return;
       OperationRecord<K> olr = (OperationRecord<K>) record;
-      K key = olr.getKey();
-      ta.addWrite(key);
+      List<K> keys = olr.getKeys();
+      ta.addWrites(keys);
       return;
     }
     }

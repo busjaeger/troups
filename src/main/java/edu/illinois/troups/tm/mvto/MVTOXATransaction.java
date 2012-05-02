@@ -38,7 +38,7 @@ public class MVTOXATransaction<K extends Key> extends MVTOTransaction<K> {
       IOException {
     if (!shouldPrepare())
       return;
-    waitForReadFrom();
+    waitForWriters();
     getTransactionLog().appendXAStateTransition(getID(), PREPARED);
     setPrepared();
   }

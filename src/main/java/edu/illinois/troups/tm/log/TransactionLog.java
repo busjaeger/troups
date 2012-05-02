@@ -2,6 +2,7 @@ package edu.illinois.troups.tm.log;
 
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.List;
 import java.util.NavigableMap;
 
 import edu.illinois.troups.tm.Key;
@@ -34,7 +35,6 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
   }
 
   public interface StateTransitionRecord<K extends Key> extends Record<K> {
-
     /**
      * transaction state
      * 
@@ -44,13 +44,12 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
   }
 
   public interface OperationRecord<K extends Key> extends Record<K> {
-
     /**
      * Key being accessed by operation
      * 
      * @return
      */
-    K getKey();
+    List<K> getKeys();
   }
 
   public interface PutRecord<K extends Key> extends OperationRecord<K> {
@@ -63,14 +62,15 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
      * 
      * @return
      */
-    long getVersion();
+    List<Long> getVersions();
   }
 
   public long appendStateTransition(TID tid, int state) throws IOException;
 
-  public long appendGet(TID tid, K key, long version) throws IOException;
+  public long appendGet(TID tid, List<K> keys, List<Long> version)
+      throws IOException;
 
-  public long appendPut(TID tid, K key) throws IOException;
+  public long appendPut(TID tid, List<K> keys) throws IOException;
 
   public abstract void truncate(long sid) throws IOException;
 
