@@ -11,6 +11,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 
 import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
+import edu.illinois.troups.tm.NotEnoughVersionsException;
 import edu.illinois.troups.tm.TransactionAbortedException;
 
 public class HTable implements Closeable {
@@ -35,14 +36,20 @@ public class HTable implements Closeable {
         .entrySet())
       for (byte[] column : entry.getValue())
         hGet.addColumn(entry.getKey(), column);
-    // convert result into non-versioned result
-    org.apache.hadoop.hbase.client.Result result;
-    try {
-      result = hTable.get(hGet);
-    } catch (RetriesExhaustedWithDetailsException e) {
-      throw unrwap(e);
+    int maxVersions = 2;
+    while (true) {
+      hGet.setMaxVersions(maxVersions);
+      // convert result into non-versioned result
+      try {
+        org.apache.hadoop.hbase.client.Result result = hTable.get(hGet);
+        return new Result(result.getNoVersionMap());
+      } catch (NotEnoughVersionsException e) {
+        maxVersions *= 2;
+        continue;
+      } catch (RetriesExhaustedWithDetailsException e) {
+        throw unrwap(e);
+      }
     }
-    return new Result(result.getNoVersionMap());
   }
 
   public void put(Transaction ta, Put put) throws TransactionAbortedException,

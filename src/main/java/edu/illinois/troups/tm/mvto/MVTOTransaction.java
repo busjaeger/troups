@@ -23,6 +23,7 @@ import org.apache.commons.logging.LogFactory;
 
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyVersions;
+import edu.illinois.troups.tm.NotEnoughVersionsException;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.log.TransactionLog;
@@ -233,7 +234,8 @@ class MVTOTransaction<K extends Key> {
    *          versions and all for the same row.
    * @throws TransactionAbortedException
    */
-  public final void afterGet(Iterable<? extends KeyVersions<K>> kvs)
+  public final void afterGet(int numVersionsRetrieved,
+      Iterable<? extends KeyVersions<K>> kvs)
       throws TransactionAbortedException, IOException {
     boolean aborted = false;
     /*
@@ -251,6 +253,7 @@ class MVTOTransaction<K extends Key> {
         List<Long> versions = new ArrayList<Long>();
         for (KeyVersions<K> kv : kvs) {
           K key = kv.getKey();
+          int abortedRemoved = 0;
           for (Iterator<Long> it = kv.getVersions().iterator(); it.hasNext();) {
             long version = it.next();
 
@@ -268,6 +271,7 @@ class MVTOTransaction<K extends Key> {
                    * transaction has been aborted, but the versions it wrote
                    * have not been cleaned up.
                    */
+                  abortedRemoved++;
                   it.remove();
                   continue;
                 case STARTED:
@@ -320,6 +324,8 @@ class MVTOTransaction<K extends Key> {
               it.remove();
             }
           }
+          if (abortedRemoved == numVersionsRetrieved)
+            throw new NotEnoughVersionsException();
         }
 
         /*

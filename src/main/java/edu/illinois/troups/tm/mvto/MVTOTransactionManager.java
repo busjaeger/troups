@@ -317,12 +317,12 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   }
 
   @Override
-  public void afterGet(TID tid, final Iterable<? extends KeyVersions<K>> kvs)
-      throws IOException {
+  public void afterGet(TID tid, final int numVersionsRetrieved,
+      final Iterable<? extends KeyVersions<K>> kvs) throws IOException {
     new IfRunning() {
       @Override
       void execute(MVTOTransaction<K> ta) throws IOException {
-        ta.afterGet(kvs);
+        ta.afterGet(numVersionsRetrieved, kvs);
       }
     }.run(tid);
   }

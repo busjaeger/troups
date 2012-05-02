@@ -54,9 +54,9 @@ public class StringKeyValueStore implements KeyValueStore<StringKey> {
     }
     Iterable<Long> versions = getVersions(key, tid.getTS());
     for (TransactionOperationObserver<StringKey> observer : observers) {
-      Iterable<StringKeyVersions> kvs = asList(new StringKeyVersions(key,
+      List<StringKeyVersions> kvs = asList(new StringKeyVersions(key,
           versions));
-      observer.afterGet(tid, kvs);
+      observer.afterGet(tid, kvs.size(), kvs);
     }
     return versions;
   }

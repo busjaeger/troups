@@ -17,8 +17,6 @@ import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_TABLE;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_ZOOKEEPER;
 
 import java.io.IOException;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -96,8 +94,8 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   public static final Log LOG = LogFactory.getLog(HRegion.class);
 
-  static final Comparator<KeyValue> COMP = KeyValue.COMPARATOR
-      .getComparatorIgnoringTimestamps();
+  // KeyValue.KEY_COMPARATOR
+  // .getComparatorIgnoringTimestamps();
 
   private final ConcurrentMap<HKey, MVTOXATransactionManager<HKey, HRecord>> tms = new ConcurrentHashMap<HKey, MVTOXATransactionManager<HKey, HRecord>>();
   private boolean started = false;
@@ -360,10 +358,11 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     try {
       // TODO check if results are already sorted by HBase; and verify newer
       // versions are sorted before older versions by Comparator
-      Collections.sort(results, KeyValue.COMPARATOR);
+      // Collections.sort(results, KeyValue.COMPARATOR);
       HKey groupKey = getGroupKey(get.getRow());
       Iterable<KeyVersions<HKey>> kvs = transform(results);
-      getTM(groupKey).afterGet(tid, kvs);
+      int numVersionsRetrieved = get.getMaxVersions();
+      getTM(groupKey).afterGet(tid, numVersionsRetrieved, kvs);
     } finally {
       postGetN++;
       postGetT += System.currentTimeMillis() - before;
@@ -505,7 +504,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
           private boolean advanceNext() {
             while (it.hasNext()) {
               next = it.next();
-              if (COMP.compare(next, current) != 0)
+              if (!new HKey(next).equals(new HKey(current)))
                 return true;
             }
             next = null;
@@ -533,9 +532,10 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
               throw new NoSuchElementException();
             current = next;
             return new KeyVersions<HKey>() {
+              final HKey key = new HKey(current);
               @Override
               public HKey getKey() {
-                return new HKey(current.getKey());
+                return key;
               }
 
               @Override
@@ -550,7 +550,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                       private boolean advanceNext() {
                         if (it.hasNext()) {
                           nextVersion = it.next();
-                          if (COMP.compare(current, nextVersion) == 0)
+                          if (key.equals(new HKey(nextVersion)))
                             return true;
                           next = nextVersion;
                         }
@@ -573,14 +573,14 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
                         if (currentVersion == null) {
                           currentVersion = current;
                           nextVersion = current;
-                        } else if (nextVersion == next)
+                          return currentVersion.getTimestamp();
+                        }
+                        if (nextVersion == next)
                           throw new NoSuchElementException();
-                        else if (currentVersion == nextVersion)
-                          advanceNext();
-                        // else current version before next version
-                        long version = currentVersion.getTimestamp();
+                        if (currentVersion == nextVersion && !advanceNext())
+                          throw new NoSuchElementException();
                         currentVersion = nextVersion;
-                        return version;
+                        return currentVersion.getTimestamp();
                       }
 
                       @Override

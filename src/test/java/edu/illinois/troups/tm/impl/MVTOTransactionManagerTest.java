@@ -118,7 +118,7 @@ public class MVTOTransactionManagerTest {
      * the schedule is no longer serializable.
      */
     try {
-      tm.afterGet(t2, singleton(key, versions));
+      tm.afterGet(t2, 1, singleton(key, versions));
       Assert.fail("read should not be permitted");
     } catch (TransactionAbortedException e) {
       // expected

@@ -15,7 +15,7 @@ public interface TransactionOperationObserver<K extends Key> {
   void failedGet(TID tid, Iterable<? extends K> keys, Throwable t)
       throws TransactionAbortedException, IOException;
 
-  void afterGet(TID tid, Iterable<? extends KeyVersions<K>> kvs)
+  void afterGet(TID tid, int maxVersions, Iterable<? extends KeyVersions<K>> kvs)
       throws TransactionAbortedException, IOException;
 
   void beforePut(TID tid, Iterable<? extends K> keys)

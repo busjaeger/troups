@@ -10,12 +10,11 @@ import java.util.List;
 import junit.framework.Assert;
 
 import org.apache.hadoop.hbase.KeyValue;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.Before;
 import org.junit.Test;
 
 import edu.illinois.troups.tm.KeyVersions;
-import edu.illinois.troups.tm.region.HKey;
-import edu.illinois.troups.tm.region.HRegionTransactionManager;
 
 public class HRegionTransactionManagerTest {
 
@@ -69,6 +68,43 @@ public class HRegionTransactionManagerTest {
       for (Long version : vs.getVersions())
         Assert.assertEquals(Long.valueOf(2L), version);
     Assert.assertEquals(4, kvs.size());
+  }
+
+  @Test
+  public void testKeys() {
+    byte[] row = Bytes.toBytes("10");
+    byte[] fam = Bytes.toBytes("balance");
+    byte[] col = Bytes
+        .toBytes("main");
+    long ts1 = 11l;
+    long ts2 = 10l;
+    
+    kvs.clear();
+    KeyValue first =new KeyValue(row, fam, col, ts1, KeyValue.Type.Put);
+    KeyValue second = new KeyValue(row, fam, col, ts2, KeyValue.Type.Put);
+    kvs.add(first);
+    kvs.add(second);
+    Collections.sort(kvs, KeyValue.COMPARATOR);
+    Iterable<KeyVersions<HKey>> versions = HRegionTransactionManager
+        .transform(kvs);
+
+    HKey expected = new HKey(row, fam, col);
+    
+    Iterator<KeyVersions<HKey>> it = versions.iterator();
+    Assert.assertTrue(it.hasNext());
+    Assert.assertEquals(expected, it.next().getKey());
+    Assert.assertFalse(it.hasNext());
+
+    it = versions.iterator();
+    Assert.assertTrue(it.hasNext());
+    KeyVersions<HKey> kv = it.next();
+    Assert.assertEquals(expected, kv.getKey());
+    Iterator<Long> vs = kv.getVersions().iterator();
+    Assert.assertTrue(vs.hasNext());
+    Assert.assertEquals((Long)ts1, vs.next());
+    Assert.assertTrue(vs.hasNext());
+    Assert.assertEquals((Long)ts2, vs.next());
+    Assert.assertFalse(vs.hasNext());
   }
 
   @Test
