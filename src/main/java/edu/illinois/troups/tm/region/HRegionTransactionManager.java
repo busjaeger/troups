@@ -111,7 +111,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private SharedTimestampManager tsm;
 
   private TimestampReclaimer collector;
-  private volatile long lrt;
+  private volatile Long lastReclaimedTimestamp;
 
   // temporary to measure response time
   private long beginN;
@@ -374,10 +374,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   public InternalScanner preCompact(
       ObserverContext<RegionCoprocessorEnvironment> e, Store store,
       InternalScanner scanner) {
-    if (e.getEnvironment().getRegion().getRegionInfo().isMetaTable()) {
+    if (e.getEnvironment().getRegion().getRegionInfo().isMetaTable()
+        || lastReclaimedTimestamp == null) {
       return scanner;
     } else {
-      return new VersionCollector(scanner, lrt);
+      LOG.info("Creating collector with version " + lastReclaimedTimestamp);
+      return new VersionCollector(tsm, scanner, lastReclaimedTimestamp);
     }
   }
 
@@ -459,9 +461,15 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   @Override
   public void reclaimed(long timestamp) {
-    lrt = timestamp;
-    for (MVTOTransactionManager<?, ?> tm : tms.values())
+    // find minimum reclaimable time stamp
+    Long min = null;
+    for (MVTOTransactionManager<?, ?> tm : tms.values()) {
       tm.reclaimed(timestamp);
+      long lastReclaimed = tm.getLastReclaimed();
+      if (min == null || min > lastReclaimed)
+        min = lastReclaimed;
+    }
+    lastReclaimedTimestamp = min;
   }
 
   private static TID getTID(OperationWithAttributes operation) {

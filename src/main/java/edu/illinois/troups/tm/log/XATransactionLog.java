@@ -19,6 +19,6 @@ public interface XATransactionLog<K extends Key, R extends Record<K>> extends
     XID getTID();
   }
 
-  public long appendXAStateTransition(XID xid, int state) throws IOException;
+  long appendXAStateTransition(XID xid, int state) throws IOException;
 
 }

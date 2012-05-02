@@ -4,10 +4,10 @@ import static edu.illinois.troups.tm.TransactionState.ABORTED;
 import static edu.illinois.troups.tm.TransactionState.COMMITTED;
 import static edu.illinois.troups.tm.TransactionState.FINALIZED;
 import static edu.illinois.troups.tm.TransactionState.STARTED;
+import static edu.illinois.troups.tm.TransientTransactionState.BLOCKED;
 import static edu.illinois.troups.tm.log.TransactionLog.RECORD_TYPE_GET;
 import static edu.illinois.troups.tm.log.TransactionLog.RECORD_TYPE_PUT;
 import static edu.illinois.troups.tm.log.TransactionLog.RECORD_TYPE_STATE_TRANSITION;
-import static edu.illinois.troups.tm.mvto.TransientTransactionState.BLOCKED;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -143,8 +143,8 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   // guards the running flag
   protected ReadWriteLock runLock = new ReentrantReadWriteLock();
   // last locally reclaimed transaction
-  protected long reclaimed;
-  //
+  protected long lastReclaimed;
+  // lock to prevent new transactions from joining while last reclaimed updated
   protected ReadWriteLock reclaimLock = new ReentrantReadWriteLock();
 
   public MVTOTransactionManager(KeyValueStore<K> keyValueStore,
@@ -154,7 +154,12 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     this.transactionLog = transactionLog;
     this.timestampManager = tsm;
     this.pool = pool;
-    this.tidComparator = TID.newComparator(tsm);
+    this.tidComparator = new Comparator<TID>() {
+      @Override
+      public int compare(TID o1, TID o2) {
+        return timestampManager.compare(o1.getTS(), o2.getTS());
+      }
+    };
     this.transactionComparator = new Comparator<MVTOTransaction<K>>() {
       @Override
       public int compare(MVTOTransaction<K> t1, MVTOTransaction<K> t2) {
@@ -185,6 +190,10 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     return pool;
   }
 
+  public long getLastReclaimed() {
+    return lastReclaimed;
+  }
+
   public void start() {
     runLock.readLock().lock();
     try {
@@ -212,7 +221,7 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       // finally run round of reclamation to remove obsolete transactions
       long ts = timestampManager.getLastReclaimedTimestamp();
       if (transactions.isEmpty())
-        this.reclaimed = ts;
+        this.lastReclaimed = ts;
       else
         reclaimed(ts);
 
@@ -602,6 +611,8 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
   public void reclaimed(long ts) {
     runLock.readLock().lock();
     try {
+      if (!running)
+        return;
       reclaimLock.writeLock().lock();
       try {
         Long cutoff = null;
@@ -611,17 +622,11 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
         while (it.hasNext()) {
           MVTOTransaction<K> ta = it.next();
           long tts = ta.getID().getTS();
-          // transaction not yet globally reclaimable
-          if (timestampManager.compare(tts, ts) > 0) {
-            reclaimed = ts;
+          // transaction started later or is not yet locally reclaimable
+          if (timestampManager.compare(tts, ts) > 0 || !reclaim(ta))
             break;
-          }
-          // transaction not yet locally reclaimable
-          if (!reclaim(ta)) {
-            reclaimed = tts - 1;
-            break;
-          }
-          // try to increment SID
+          // transaction reclaimed: update state and try to increment cutoff
+          lastReclaimed = tts;
           long sid = ta.getFirstSID();
           if (cutoff == null || transactionLog.compare(cutoff, sid) < 0)
             cutoff = sid;

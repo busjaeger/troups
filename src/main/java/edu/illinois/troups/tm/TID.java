@@ -3,23 +3,11 @@ package edu.illinois.troups.tm;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
-import java.util.Comparator;
 
 import org.apache.hadoop.io.DataInputBuffer;
 import org.apache.hadoop.io.Writable;
 
-import edu.illinois.troups.tsm.TimestampManager;
-
 public class TID implements Writable {
-
-  public static Comparator<TID> newComparator(final TimestampManager tsm) {
-    return new Comparator<TID>() {
-      @Override
-      public int compare(TID o1, TID o2) {
-        return tsm.compare(o1.getTS(), o2.getTS());
-      }
-    };
-  }
 
   private long ts;
 

@@ -4,7 +4,7 @@ import static edu.illinois.troups.tm.TransactionState.ABORTED;
 import static edu.illinois.troups.tm.TransactionState.COMMITTED;
 import static edu.illinois.troups.tm.TransactionState.FINALIZED;
 import static edu.illinois.troups.tm.TransactionState.STARTED;
-import static edu.illinois.troups.tm.mvto.TransientTransactionState.BLOCKED;
+import static edu.illinois.troups.tm.TransientTransactionState.BLOCKED;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -115,7 +115,7 @@ class MVTOTransaction<K extends Key> {
     if (!shouldAbort())
       return;
     getTransactionLog().appendStateTransition(id, ABORTED);
-    // can notify before changing state, since holding monitor
+    // note: OK to notify before changing state, since holding monitor
     if (state == BLOCKED)
       notify();
     setAborted();

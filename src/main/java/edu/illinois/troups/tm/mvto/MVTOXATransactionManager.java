@@ -53,10 +53,13 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
       reclaimLock.readLock().lock();
       try {
         long ts = tid.getTS();
-        // only allow in timestamps that have not been relcaimed: otherwise we
-        // may not be able to implement the concurrency protocol correctly in
-        // case we already discarded transactions that follow this one
-        if (timestampManager.compare(ts, reclaimed) < 0)
+        /*
+         * only allow in transactions that started before the first active
+         * transaction. Otherwise, we may not be able to implement the
+         * concurrency control protocol correctly, in case we already discarded
+         * transactions that follow this one.
+         */
+        if (timestampManager.compare(ts, lastReclaimed) <= 0)
           throw new TransactionAbortedException("Already reclaimed " + tid);
 
         long pid;

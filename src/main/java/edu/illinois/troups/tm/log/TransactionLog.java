@@ -26,7 +26,7 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
     TID getTID();
 
     /**
-     * type of log record
+     * type of log record for efficient switch
      * 
      * @return
      */
@@ -65,15 +65,14 @@ public interface TransactionLog<K extends Key, R extends Record<K>> extends
     List<Long> getVersions();
   }
 
-  public long appendStateTransition(TID tid, int state) throws IOException;
+  long appendStateTransition(TID tid, int state) throws IOException;
 
-  public long appendGet(TID tid, List<K> keys, List<Long> version)
-      throws IOException;
+  long appendGet(TID tid, List<K> keys, List<Long> version) throws IOException;
 
-  public long appendPut(TID tid, List<K> keys) throws IOException;
+  long appendPut(TID tid, List<K> keys) throws IOException;
 
-  public abstract void truncate(long sid) throws IOException;
+  void truncate(long sid) throws IOException;
 
-  public abstract NavigableMap<Long, R> open() throws IOException;
+  NavigableMap<Long, R> open() throws IOException;
 
 }
