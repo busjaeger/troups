@@ -13,6 +13,7 @@ import org.apache.hadoop.io.DataOutputBuffer;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.log.TransactionLog;
 import edu.illinois.troups.tm.region.HKey;
+import edu.illinois.troups.util.perf.ThreadLocalStopWatch;
 
 public class HGroupTransactionLog implements TransactionLog<HKey, HRecord> {
 
@@ -54,7 +55,8 @@ public class HGroupTransactionLog implements TransactionLog<HKey, HRecord> {
   }
 
   @Override
-  public long appendGet(TID tid, List<HKey> keys, List<Long> versions) throws IOException {
+  public long appendGet(TID tid, List<HKey> keys, List<Long> versions)
+      throws IOException {
     HRecord record = new HGetRecord(tid, keys, versions);
     return append(groupKey, record);
   }
@@ -77,21 +79,26 @@ public class HGroupTransactionLog implements TransactionLog<HKey, HRecord> {
   }
 
   protected long append(HKey groupKey, HRecord record) throws IOException {
-    // 1. serialize the log record - note: the group key is not serialized,
-    // since it's already used as the log table row key
-    DataOutputBuffer out = new DataOutputBuffer();
-    // write type so we know which class to create during recovery
-    out.writeInt(record.getType());
-    record.write(out);
-    out.close();
-    byte[] value = out.getData();
+    ThreadLocalStopWatch.start("HGroupTransactionLog.append");
+    try {
+      // 1. serialize the log record - note: the group key is not serialized,
+      // since it's already used as the log table row key
+      DataOutputBuffer out = new DataOutputBuffer();
+      // write type so we know which class to create during recovery
+      out.writeInt(record.getType());
+      record.write(out);
+      out.close();
+      byte[] value = out.getData();
 
-    // 2. store in log
-    long sid = sidCounter.getAndIncrement();
-    logStore.append(groupKey, sid, value);
+      // 2. store in log
+      long sid = sidCounter.getAndIncrement();
+      logStore.append(groupKey, sid, value);
 
-    // 3. return log record sequence ID
-    return sid;
+      // 3. return log record sequence ID
+      return sid;
+    } finally {
+      ThreadLocalStopWatch.stop();
+    }
   }
 
   protected HRecord create(int type) {

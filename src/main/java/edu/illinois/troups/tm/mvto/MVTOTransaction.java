@@ -28,6 +28,7 @@ import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.log.TransactionLog;
 import edu.illinois.troups.tsm.TimestampManager;
+import edu.illinois.troups.util.perf.ThreadLocalStopWatch;
 
 class MVTOTransaction<K extends Key> {
 
@@ -70,16 +71,21 @@ class MVTOTransaction<K extends Key> {
 
   public final synchronized void commit() throws TransactionAbortedException,
       IOException {
-    // check if state transition valid
-    if (!shouldCommit())
-      return;
-    // wait for transactions we read from to complete
-    waitForWriters();
-    // persist state transition
-    getTransactionLog().appendStateTransition(id, COMMITTED);
-    // apply in-memory state transition
-    setCommitted();
-    tm.scheduleFinalize(id);
+    ThreadLocalStopWatch.start("TA.commit");
+    try {
+      // check if state transition valid
+      if (!shouldCommit())
+        return;
+      // wait for transactions we read from to complete
+      waitForWriters();
+      // persist state transition
+      getTransactionLog().appendStateTransition(id, COMMITTED);
+      // apply in-memory state transition
+      setCommitted();
+      tm.scheduleFinalize(id);
+    } finally {
+      ThreadLocalStopWatch.stop();
+    }
   }
 
   protected boolean shouldCommit() {
@@ -113,14 +119,19 @@ class MVTOTransaction<K extends Key> {
   }
 
   public final synchronized void abort() throws IOException {
-    if (!shouldAbort())
-      return;
-    getTransactionLog().appendStateTransition(id, ABORTED);
-    // note: OK to notify before changing state, since holding monitor
-    if (state == BLOCKED)
-      notify();
-    setAborted();
-    tm.scheduleFinalize(id);
+    ThreadLocalStopWatch.start("TA.abort");
+    try {
+      if (!shouldAbort())
+        return;
+      getTransactionLog().appendStateTransition(id, ABORTED);
+      // note: OK to notify before changing state, since holding monitor
+      if (state == BLOCKED)
+        notify();
+      setAborted();
+      tm.scheduleFinalize(id);
+    } finally {
+      ThreadLocalStopWatch.stop();
+    }
   }
 
   protected boolean shouldAbort() {
@@ -175,9 +186,7 @@ class MVTOTransaction<K extends Key> {
   }
 
   protected void releaseTimestamp() throws IOException {
-    long before = System.currentTimeMillis();
     getTimestampManager().release(id.getTS());
-    tm.timestampTime(System.currentTimeMillis() - before);
   }
 
   // in-memory state transition
@@ -244,103 +253,109 @@ class MVTOTransaction<K extends Key> {
      * since otherwise we may admit the writer even though it would have
      * conflicted with the read we just let it.
      */
-    List<K> lockedKeys = getKeys(kvs);
-    tm.readLock(lockedKeys);
+    ThreadLocalStopWatch.start("TA.afterGet");
     try {
-      synchronized (this) {
-        checkRunning();
-        List<K> keys = new ArrayList<K>();
-        List<Long> versions = new ArrayList<Long>();
-        for (KeyVersions<K> kv : kvs) {
-          K key = kv.getKey();
-          int abortedRemoved = 0;
-          for (Iterator<Long> it = kv.getVersions().iterator(); it.hasNext();) {
-            long version = it.next();
+      List<K> lockedKeys = getKeys(kvs);
+      tm.readLock(lockedKeys);
+      try {
+        synchronized (this) {
+          checkRunning();
+          List<K> keys = new ArrayList<K>();
+          List<Long> versions = new ArrayList<Long>();
+          for (KeyVersions<K> kv : kvs) {
+            K key = kv.getKey();
+            int abortedRemoved = 0;
+            for (Iterator<Long> it = kv.getVersions().iterator(); it.hasNext();) {
+              long version = it.next();
 
-            /*
-             * 1. Get the transaction that wrote this version. If we don't have
-             * one, it means the transaction has finished and has been garbage
-             * collected.
-             */
-            MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
-            if (writer != null) {
-              synchronized (writer) {
-                switch (writer.state) {
-                case ABORTED:
-                  /*
-                   * transaction has been aborted, but the versions it wrote
-                   * have not been cleaned up.
-                   */
-                  abortedRemoved++;
-                  it.remove();
-                  continue;
-                case STARTED:
-                case BLOCKED:
-                  /*
-                   * we are modifying transaction in-memory state here before
-                   * logging. This is because we make the decision at this point
-                   * to read from this transaction. If we release the lock on
-                   * the writer first, the writer could abort shortly after
-                   * without knowing that we read from it, so the abort would
-                   * not be propagated.
-                   */
-                  addReadFrom(writer);
-                  break;
-                default:
-                  break;
+              /*
+               * 1. Get the transaction that wrote this version. If we don't
+               * have one, it means the transaction has finished and has been
+               * garbage collected.
+               */
+              MVTOTransaction<K> writer = tm.getTransaction(new TID(version));
+              if (writer != null) {
+                synchronized (writer) {
+                  switch (writer.state) {
+                  case ABORTED:
+                    /*
+                     * transaction has been aborted, but the versions it wrote
+                     * have not been cleaned up.
+                     */
+                    abortedRemoved++;
+                    it.remove();
+                    continue;
+                  case STARTED:
+                  case BLOCKED:
+                    /*
+                     * we are modifying transaction in-memory state here before
+                     * logging. This is because we make the decision at this
+                     * point to read from this transaction. If we release the
+                     * lock on the writer first, the writer could abort shortly
+                     * after without knowing that we read from it, so the abort
+                     * would not be propagated.
+                     */
+                    addReadFrom(writer);
+                    break;
+                  default:
+                    break;
+                  }
                 }
               }
-            }
 
-            /*
-             * 2. Check if we have admitted a writer that started before this
-             * transaction but whose version is not in the result set. If that's
-             * the case, we cannot let this reader proceed, because reading an
-             * older version would violate the serialization order (if this
-             * transaction had already read the older value, the writer would
-             * have never been admitted)
-             */
-            // TODO we need to take order of readers/writers into account
-            NavigableSet<MVTOTransaction<K>> writes = tm.getActiveWriters(key);
-            if (writes != null) {
-              MVTOTransaction<K> lastWrite = writes.lower(this);
-              if (lastWrite != null
-                  && tm.getTimestampManager().compare(lastWrite.id.getTS(),
-                      version) > 0) {
-                tm.readUnlock(lockedKeys);
-                aborted = true;
-                abort();
-                throw new TransactionAbortedException("Read conflict");
+              /*
+               * 2. Check if we have admitted a writer that started before this
+               * transaction but whose version is not in the result set. If
+               * that's the case, we cannot let this reader proceed, because
+               * reading an older version would violate the serialization order
+               * (if this transaction had already read the older value, the
+               * writer would have never been admitted)
+               */
+              // TODO we need to take order of readers/writers into account
+              NavigableSet<MVTOTransaction<K>> writes = tm
+                  .getActiveWriters(key);
+              if (writes != null) {
+                MVTOTransaction<K> lastWrite = writes.lower(this);
+                if (lastWrite != null
+                    && tm.getTimestampManager().compare(lastWrite.id.getTS(),
+                        version) > 0) {
+                  tm.readUnlock(lockedKeys);
+                  aborted = true;
+                  abort();
+                  throw new TransactionAbortedException("Read conflict");
+                }
+              }
+
+              // 3. Add this key and version to the read set
+              keys.add(key);
+              versions.add(version);
+
+              // 4. remove all older versions of this key from result set
+              while (it.hasNext()) {
+                it.next();
+                it.remove();
               }
             }
-
-            // 3. Add this key and version to the read set
-            keys.add(key);
-            versions.add(version);
-
-            // 4. remove all older versions of this key from result set
-            while (it.hasNext()) {
-              it.next();
-              it.remove();
-            }
+            if (abortedRemoved == numVersionsRetrieved)
+              throw new NotEnoughVersionsException();
           }
-          if (abortedRemoved == numVersionsRetrieved)
-            throw new NotEnoughVersionsException();
-        }
 
-        /*
-         * 5. Log the versions we read, so in case the server goes down we can
-         * reconstruct the in-memory state to resume processing where we left
-         * off. Also
-         */
-        if (!keys.isEmpty()) {
-          getTransactionLog().appendGet(id, keys, versions);
-          addGets(keys, versions);
+          /*
+           * 5. Log the versions we read, so in case the server goes down we can
+           * reconstruct the in-memory state to resume processing where we left
+           * off. Also
+           */
+          if (!keys.isEmpty()) {
+            getTransactionLog().appendGet(id, keys, versions);
+            addGets(keys, versions);
+          }
         }
+      } finally {
+        if (!aborted)
+          tm.readUnlock(lockedKeys);
       }
     } finally {
-      if (!aborted)
-        tm.readUnlock(lockedKeys);
+      ThreadLocalStopWatch.stop();
     }
   }
 
@@ -365,65 +380,75 @@ class MVTOTransaction<K extends Key> {
   }
 
   public final void beforePut(Iterable<? extends K> keys) throws IOException {
-    boolean aborted = false;
-    tm.writeLock(keys);
+    ThreadLocalStopWatch.start("TA.beforePut");
     try {
-      synchronized (this) {
-        checkRunning();
-        List<K> wKeys = new ArrayList<K>();
-        for (K key : keys) {
-          // enforce proper time-stamp ordering: abort transaction if needed
-          NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = tm
-              .getReads(key);
-          if (versions != null) {
-            // reduce to readers that read versions written before this TA
-            // started
-            for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
-                id.getTS(), false).values()) {
-              // check if any version has been read by a TA that started after
-              // this TA
-              MVTOTransaction<K> reader = readers.higher(this);
-              if (reader != null) {
-                tm.writeUnlock(key);
-                aborted = true;
-                abort();
-                throw new TransactionAbortedException("Transaction " + id
-                    + " write conflict with " + reader.id);
+      boolean aborted = false;
+      tm.writeLock(keys);
+      try {
+        synchronized (this) {
+          checkRunning();
+          List<K> wKeys = new ArrayList<K>();
+          for (K key : keys) {
+            // enforce proper time-stamp ordering: abort transaction if needed
+            NavigableMap<Long, NavigableSet<MVTOTransaction<K>>> versions = tm
+                .getReads(key);
+            if (versions != null) {
+              // reduce to readers that read versions written before this TA
+              // started
+              for (NavigableSet<MVTOTransaction<K>> readers : versions.headMap(
+                  id.getTS(), false).values()) {
+                // check if any version has been read by a TA that started after
+                // this TA
+                MVTOTransaction<K> reader = readers.higher(this);
+                if (reader != null) {
+                  tm.writeUnlock(key);
+                  aborted = true;
+                  abort();
+                  throw new TransactionAbortedException("Transaction " + id
+                      + " write conflict with " + reader.id);
+                }
               }
             }
+            wKeys.add(key);
           }
-          wKeys.add(key);
-        }
 
-        /*
-         * Remember any keys written by the transaction, so we can roll the
-         * changes back in case it aborts later.
-         */
-        if (!wKeys.isEmpty()) {
-          getTransactionLog().appendPut(id, wKeys);
-          addWrites(keys);
-          // TODO we need to take order of readers/writers into account
-          for (K key : wKeys)
-            tm.addActiveWriter(key, this);
+          /*
+           * Remember any keys written by the transaction, so we can roll the
+           * changes back in case it aborts later.
+           */
+          if (!wKeys.isEmpty()) {
+            getTransactionLog().appendPut(id, wKeys);
+            addWrites(keys);
+            // TODO we need to take order of readers/writers into account
+            for (K key : wKeys)
+              tm.addActiveWriter(key, this);
+          }
         }
+      } finally {
+        if (!aborted)
+          tm.writeUnlock(keys);
       }
     } finally {
-      if (!aborted)
-        tm.writeUnlock(keys);
+      ThreadLocalStopWatch.stop();
     }
   }
 
   public final void afterPut(Iterable<? extends K> keys) throws IOException {
-    tm.writeLock(keys);
+    ThreadLocalStopWatch.start("TA.beforePut");
     try {
-      synchronized (this) {
-        checkRunning();
-        // TODO we need to take order of readers/writers into account
-        for (K key : keys)
-          tm.removeActiveWriter(key, this);
+      tm.writeLock(keys);
+      try {
+        synchronized (this) {
+          checkRunning();
+          // TODO we need to take order of readers/writers into account
+          for (K key : keys)
+            tm.removeActiveWriter(key, this);
+        }
+      } finally {
+        tm.writeUnlock(keys);
       }
     } finally {
-      tm.writeUnlock(keys);
+      ThreadLocalStopWatch.stop();
     }
   }
 
@@ -479,29 +504,35 @@ class MVTOTransaction<K extends Key> {
 
   // blocks until read-from transactions complete
   synchronized void waitForWriters() throws IOException {
-    while (!readFrom.isEmpty()) {
-      state = BLOCKED;
-      try {
-        wait();
-      } catch (InterruptedException e) {
-        Thread.interrupted();
+    ThreadLocalStopWatch.start("TA.beforePut");
+    try {
+      while (!readFrom.isEmpty()) {
+        state = BLOCKED;
+        try {
+          wait();
+        } catch (InterruptedException e) {
+          Thread.interrupted();
+        }
+        // we released the lock, so state may have changed
+        switch (state) {
+        case ABORTED:
+          // 1. the read-from transaction aborted and cascaded its abort
+          throw new TransactionAbortedException("Transaction " + id
+              + " is victim of cascading abort");
+        case STARTED:
+          // 2. the transaction manager was shut down and interrupted the commit
+          throw new IOException("Commit interrupted");// IOException means:
+                                                      // retry
+        case BLOCKED:
+          break;
+        case COMMITTED:
+        case FINALIZED:
+          // 3. we should never get into one of these states
+          throw newISA("doCommit");
+        }
       }
-      // we released the lock, so state may have changed
-      switch (state) {
-      case ABORTED:
-        // 1. the read-from transaction aborted and cascaded its abort
-        throw new TransactionAbortedException("Transaction " + id
-            + " is victim of cascading abort");
-      case STARTED:
-        // 2. the transaction manager was shut down and interrupted the commit
-        throw new IOException("Commit interrupted");// IOException means: retry
-      case BLOCKED:
-        break;
-      case COMMITTED:
-      case FINALIZED:
-        // 3. we should never get into one of these states
-        throw newISA("doCommit");
-      }
+    } finally {
+      ThreadLocalStopWatch.stop();
     }
   }
 

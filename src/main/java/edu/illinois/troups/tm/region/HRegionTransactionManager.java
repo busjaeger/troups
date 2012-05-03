@@ -1,6 +1,7 @@
 package edu.illinois.troups.tm.region;
 
 import static edu.illinois.troups.Constants.DEFAULT_LOG_IMPL;
+import static edu.illinois.troups.Constants.DEFAULT_STOP_WATCH_ENABLED;
 import static edu.illinois.troups.Constants.DEFAULT_TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.DEFAULT_TRANSACTION_TIMEOUT;
 import static edu.illinois.troups.Constants.DEFAULT_TSS_IMPL;
@@ -9,6 +10,7 @@ import static edu.illinois.troups.Constants.LOG_IMPL;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FAMILY;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_FILE;
 import static edu.illinois.troups.Constants.LOG_IMPL_VALUE_TABLE;
+import static edu.illinois.troups.Constants.STOP_WATCH_ENABLED;
 import static edu.illinois.troups.Constants.TM_THREAD_COUNT;
 import static edu.illinois.troups.Constants.TRANSACTION_TIMEOUT;
 import static edu.illinois.troups.Constants.TSS_IMPL;
@@ -16,7 +18,10 @@ import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_SERVER;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_TABLE;
 import static edu.illinois.troups.Constants.TSS_IMPL_VALUE_ZOOKEEPER;
 
+import java.io.File;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -87,6 +92,8 @@ import edu.illinois.troups.tsm.TimestampReclaimer;
 import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKTimestampReclaimer;
+import edu.illinois.troups.util.perf.ThreadLocalStopWatch;
+import edu.illinois.troups.util.perf.Times;
 
 public class HRegionTransactionManager extends BaseRegionObserver implements
     GroupTransactionManager<HKey>, CrossGroupTransactionManager<HKey>,
@@ -105,25 +112,22 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private ScheduledExecutorService pool;
   private HTablePool tablePool;
   private long transactionTimeout;
-
   private SharedTimestampManager tsm;
-
   private TimestampReclaimer collector;
   private volatile Long lastReclaimedTimestamp;
 
   // temporary to measure response time
-  private long beginN;
-  private long beginT;
-  private long preGetN;
-  private long preGetT;
-  private long postGetN;
-  private long postGetT;
-  private long prePutN;
-  private long prePutT;
-  private long postPutN;
-  private long postPutT;
-  private long commitN;
-  private long commitT;
+  private Times beginTimes;
+  private Times commitTimes;
+  private Times abortTimes;
+  private Times joinTimes;
+  private Times prepareTimes;
+  private Times xaCommitTimes;
+  private Times xaAbortTimes;
+  private Times preGetTimes;
+  private Times postGetTimes;
+  private Times prePutTimes;
+  private Times postPutTimes;
 
   private MVTOXATransactionManager<HKey, HRecord> getTM(HKey groupKey) {
     MVTOXATransactionManager<HKey, HRecord> tm = tms.get(groupKey);
@@ -193,12 +197,14 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int tssImpl = conf.getInt(TSS_IMPL, DEFAULT_TSS_IMPL);
     switch (tssImpl) {
     case TSS_IMPL_VALUE_ZOOKEEPER:
+      LOG.info("TSM: Zookeeper");
       ZooKeeperWatcher zkw = env.getRegionServerServices().getZooKeeper();
       tsm = new ZKSharedTimestampManager(zkw);
       Runnable r = new ZKTimestampReclaimer((ZKSharedTimestampManager) tsm);
       collector = new TimestampReclaimer(r, conf, pool, zkw);
       break;
     case TSS_IMPL_VALUE_TABLE:
+      LOG.info("TSM: HTable");
       zkw = env.getRegionServerServices().getZooKeeper();
       tsm = HTableSharedTimestampManager.newInstance(conf, tablePool, pool);
       collector = new TimestampReclaimer((Runnable) tsm, conf, pool, zkw);
@@ -213,10 +219,12 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     int logImpl = conf.getInt(LOG_IMPL, DEFAULT_LOG_IMPL);
     switch (logImpl) {
     case LOG_IMPL_VALUE_TABLE:
+      LOG.info("Log: HTable");
       byte[] tableName = region.getTableDesc().getName();
       logStore = HTableLogStore.newInstance(tablePool, conf, tableName);
       break;
     case LOG_IMPL_VALUE_FILE:
+      LOG.info("Log: File");
       FileSystem fs = region.getFilesystem();
       Path groupsDir = new Path(region.getRegionDir().getParent(), "groups");
       if (!fs.exists(groupsDir))
@@ -224,10 +232,25 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       logStore = new HSequenceFileLogStore(fs, groupsDir);
       break;
     case LOG_IMPL_VALUE_FAMILY:
+      LOG.info("Log: Region");
       String logFamily = region.getTableDesc().getValue(LOG_FAMILY_NAME);
       if (logFamily == null)
         logFamily = Constants.DEFAULT_LOG_FAMILY_NAME;
       logStore = new HRegionLogStore(region, Bytes.toBytes(logFamily));
+    }
+
+    if (conf.getBoolean(STOP_WATCH_ENABLED, DEFAULT_STOP_WATCH_ENABLED)) {
+      beginTimes = new Times();
+      commitTimes = new Times();
+      abortTimes = new Times();
+      joinTimes = new Times();
+      prepareTimes = new Times();
+      xaCommitTimes = new Times();
+      xaAbortTimes = new Times();
+      preGetTimes = new Times();
+      postGetTimes = new Times();
+      prePutTimes = new Times();
+      postPutTimes = new Times();
     }
 
     // create timestamp collector
@@ -262,12 +285,30 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     if (!started)
       return;
 
-    LOG.info("begin time: " + average(beginT, beginN));
-    LOG.info("preGet time: " + average(preGetT, preGetN));
-    LOG.info("postGet time: " + average(postGetT, postGetN));
-    LOG.info("prePut time: " + average(prePutT, prePutN));
-    LOG.info("postPut time: " + average(postPutT, postPutN));
-    LOG.info("commit time " + average(commitT, commitN));
+    if (e.getEnvironment().getConfiguration()
+        .getBoolean(STOP_WATCH_ENABLED, DEFAULT_STOP_WATCH_ENABLED)) {
+      String logDir = System.getProperty("hbase.log.dir");
+      if (logDir == null)
+        logDir = "";
+      try {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH:mm:ss");
+        String prefix = "times." + sdf.format(new Date()) +".";
+        preGetTimes.write(new File(logDir, prefix + "preGet.log"));
+        postGetTimes.write(new File(logDir, prefix + "postGet.log"));
+        prePutTimes.write(new File(logDir, prefix + "prePut.log"));
+        postPutTimes.write(new File(logDir, prefix + "postPut.log"));
+        beginTimes.write(new File(logDir, prefix + "begin.log"));
+        commitTimes.write(new File(logDir, prefix + "commit.log"));
+        abortTimes.write(new File(logDir, prefix + "abort.log"));
+        joinTimes.write(new File(logDir, prefix + "join.log"));
+        prepareTimes.write(new File(logDir, prefix + "prepare.log"));
+        xaCommitTimes.write(new File(logDir, prefix + "xa-commit.log"));
+        xaAbortTimes.write(new File(logDir, prefix + "xa-abort.log"));
+      } catch (IOException ex) {
+        LOG.error("failed to write measurements", ex);
+        ex.printStackTrace(System.out);
+      }
+    }
 
     for (MVTOXATransactionManager<HKey, HRecord> tm : tms.values())
       tm.stopping();
@@ -291,7 +332,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     TID tid = getTID(put);
     if (tid == null)
       return;
-    long before = System.currentTimeMillis();
+    ThreadLocalStopWatch.start(prePutTimes);
     try {
       if (put.getTimeStamp() != tid.getTS())
         throw new IllegalArgumentException("timestamp does not match tid");
@@ -302,8 +343,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
           .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
       getTM(groupKey).beforePut(tid, keys);
     } finally {
-      prePutN++;
-      prePutT += System.currentTimeMillis() - before;
+      ThreadLocalStopWatch.stop(prePutTimes);
     }
   }
 
@@ -313,7 +353,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     TID tid = getTID(put);
     if (tid == null)
       return;
-    long before = System.currentTimeMillis();
+    ThreadLocalStopWatch.start(postPutTimes);
     try {
       HKey groupKey = getGroupKey(put.getRow());
       Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
@@ -321,8 +361,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
           .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
       getTM(groupKey).beforePut(tid, keys);
     } finally {
-      postPutN++;
-      postPutT += System.currentTimeMillis() - before;
+      ThreadLocalStopWatch.stop(postPutTimes);
     }
   }
 
@@ -332,7 +371,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     TID tid = getTID(get);
     if (tid == null)
       return;
-    long before = System.currentTimeMillis();
+    ThreadLocalStopWatch.start(preGetTimes);
     try {
       TimeRange tr = get.getTimeRange();
       if (tr.getMin() != 0L || tr.getMax() != tid.getTS())
@@ -343,8 +382,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       Iterable<HKey> keys = transform(get.getRow(), get.getFamilyMap());
       getTM(groupKey).beforeGet(tid, keys);
     } finally {
-      preGetN++;
-      preGetT += System.currentTimeMillis() - before;
+      ThreadLocalStopWatch.stop(preGetTimes);
     }
   }
 
@@ -354,7 +392,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     TID tid = getTID(get);
     if (tid == null)
       return;
-    long before = System.currentTimeMillis();
+    ThreadLocalStopWatch.start(postGetTimes);
     try {
       // TODO check if results are already sorted by HBase; and verify newer
       // versions are sorted before older versions by Comparator
@@ -364,8 +402,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       int numVersionsRetrieved = get.getMaxVersions();
       getTM(groupKey).afterGet(tid, numVersionsRetrieved, kvs);
     } finally {
-      postGetN++;
-      postGetT += System.currentTimeMillis() - before;
+      ThreadLocalStopWatch.stop(postGetTimes);
     }
   }
 
@@ -398,51 +435,74 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
 
   @Override
   public TID begin(HKey groupKey) throws IOException {
-    long before = System.currentTimeMillis();
+    ThreadLocalStopWatch.start(beginTimes);
     try {
       return demandTM(groupKey).begin();
     } finally {
-      beginN++;
-      beginT += System.currentTimeMillis() - before;
+      ThreadLocalStopWatch.stop(beginTimes);
     }
   }
 
   @Override
   public void commit(HKey groupKey, TID tid)
       throws TransactionAbortedException, IOException {
-    long before = System.currentTimeMillis();
+    ThreadLocalStopWatch.start(commitTimes);
     try {
       getTM(groupKey).commit(tid);
     } finally {
-      commitN++;
-      commitT += System.currentTimeMillis() - before;
+      ThreadLocalStopWatch.stop(commitTimes);
     }
   }
 
   @Override
   public void abort(HKey groupKey, TID tid) throws IOException {
-    getTM(groupKey).abort(tid);
+    ThreadLocalStopWatch.start(abortTimes);
+    try {
+      getTM(groupKey).abort(tid);
+    } finally {
+      ThreadLocalStopWatch.stop(abortTimes);
+    }
   }
 
   @Override
   public XID join(HKey groupKey, TID tid) throws IOException {
-    return demandTM(groupKey).join(tid);
+    ThreadLocalStopWatch.start(joinTimes);
+    try {
+      return demandTM(groupKey).join(tid);
+    } finally {
+      ThreadLocalStopWatch.stop(joinTimes);
+    }
   }
 
   @Override
   public void prepare(HKey groupKey, XID xid) throws IOException {
-    getTM(groupKey).prepare(xid);
+    ThreadLocalStopWatch.start(prepareTimes);
+    try {
+      getTM(groupKey).prepare(xid);
+    } finally {
+      ThreadLocalStopWatch.stop(postGetTimes);
+    }
   }
 
   @Override
   public void commit(HKey groupKey, XID xid, boolean onePhase)
       throws IOException {
-    getTM(groupKey).commit(xid, onePhase);
+    ThreadLocalStopWatch.start(xaCommitTimes);
+    try {
+      getTM(groupKey).commit(xid, onePhase);
+    } finally {
+      ThreadLocalStopWatch.stop(xaCommitTimes);
+    }
   }
 
   @Override
   public void abort(HKey groupKey, XID xid) throws IOException {
-    getTM(groupKey).abort(xid);
+    ThreadLocalStopWatch.start(xaAbortTimes);
+    try {
+      getTM(groupKey).abort(xid);
+    } finally {
+      ThreadLocalStopWatch.stop(xaAbortTimes);
+    }
   }
 
   @Override
@@ -533,6 +593,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
             current = next;
             return new KeyVersions<HKey>() {
               final HKey key = new HKey(current);
+
               @Override
               public HKey getKey() {
                 return key;

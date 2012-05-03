@@ -43,6 +43,7 @@ import edu.illinois.troups.tm.log.TransactionLog.Record;
 import edu.illinois.troups.tm.log.TransactionLog.StateTransitionRecord;
 import edu.illinois.troups.tsm.TimestampManager;
 import edu.illinois.troups.tsm.TimestampManager.TimestampReclamationListener;
+import edu.illinois.troups.util.perf.ThreadLocalStopWatch;
 
 /**
  * Note: this class (and all other classes in this package) do not depend on
@@ -234,14 +235,6 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
     }
   }
 
-  private long tTime;
-  private long tNum;
-
-  void timestampTime(long time) {
-    tNum++;
-    tTime += time;
-  }
-
   public void stopping() {
     runLock.readLock().lock();
     try {
@@ -273,7 +266,6 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
         return;
       // at this point we do not allow any more commits
       closing = true;
-      LOG.info("Timestamp time " + (tNum > 0 ? tTime / tNum : 0));
     } finally {
       runLock.writeLock().unlock();
     }
@@ -378,9 +370,13 @@ public class MVTOTransactionManager<K extends Key, R extends Record<K>>
       checkRunning();
 
       // modify persistent state: acquire ID and log begin
-      long before = System.currentTimeMillis();
-      long ts = getTimestampManager().acquire();
-      timestampTime(System.currentTimeMillis() - before);
+      long ts;
+      ThreadLocalStopWatch.start("TM.acquire");
+      try {
+        ts = getTimestampManager().acquire();
+      } finally {
+        ThreadLocalStopWatch.stop();
+      }
       TID id = new TID(ts);
       long sid;
       try {

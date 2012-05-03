@@ -22,6 +22,7 @@ import edu.illinois.troups.tm.log.XATransactionLog;
 import edu.illinois.troups.tm.log.XATransactionLog.XAStateTransitionRecord;
 import edu.illinois.troups.tsm.NoSuchTimestampException;
 import edu.illinois.troups.tsm.SharedTimestampManager;
+import edu.illinois.troups.util.perf.ThreadLocalStopWatch;
 
 public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
     extends MVTOTransactionManager<K, R> implements XATransactionManager {
@@ -63,10 +64,15 @@ public class MVTOXATransactionManager<K extends Key, R extends Record<K>>
           throw new TransactionAbortedException("Already reclaimed " + tid);
 
         long pid;
+        ThreadLocalStopWatch.start("TM.acquireRef");
         try {
-          pid = getTimestampManager().acquireReference(ts);
-        } catch (NoSuchTimestampException e) {
-          throw new TransactionAbortedException("Already reclaimed " + tid, e);
+          try {
+            pid = getTimestampManager().acquireReference(ts);
+          } catch (NoSuchTimestampException e) {
+            throw new TransactionAbortedException("Already reclaimed " + tid, e);
+          }
+        } finally {
+          ThreadLocalStopWatch.stop();
         }
 
         XID xid = new XID(ts, pid);

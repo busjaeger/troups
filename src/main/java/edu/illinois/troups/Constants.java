@@ -7,6 +7,10 @@ public interface Constants {
 
   // configuration properties
 
+  public static final String STOP_WATCH_ENABLED = "troups.stop.watch.enabled";
+
+  public static final boolean DEFAULT_STOP_WATCH_ENABLED = false;
+
   public static final String CLIENT_THREAD_COUNT = "troups.client.thread.count";
 
   public static final int DEFAULT_CLIENT_THREAD_COUNT = 5;
