@@ -40,6 +40,7 @@ public class TimestampManagerServerClient implements SharedTimestampManager {
       throw new IllegalStateException(TSS_SERVER_NAME + " property not set");
     int port = conf.getInt(TSS_SERVER_PORT, DEFAULT_TSS_SERVER_PORT);
     InetSocketAddress isa = new InetSocketAddress(host, port);
+    LOG.info("TSM client connecting to: " + isa);
     int rpcTimeout = conf.getInt(HBASE_RPC_TIMEOUT_KEY,
         DEFAULT_HBASE_RPC_TIMEOUT);
     this.proxy = (TimestampManagerServer) HBaseRPC.getProxy(

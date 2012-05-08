@@ -37,14 +37,15 @@ public class TimestampServer implements Runnable {
     if (host == null)
       throw new IllegalStateException(TSS_SERVER_NAME + " property not set");
     int port = conf.getInt(TSS_SERVER_PORT, DEFAULT_TSS_SERVER_PORT);
-    InetSocketAddress initialIsa = new InetSocketAddress(host, port);
-    if (initialIsa.getAddress() == null)
-      throw new IllegalArgumentException("Failed resolve of " + initialIsa);
+    InetSocketAddress isa = new InetSocketAddress(host, port);
+    System.out.println("TSM listening on: "+isa);
+    if (isa.getAddress() == null)
+      throw new IllegalArgumentException("Failed resolve of " + isa);
     int numHandlers = conf.getInt(TSS_SERVER_HANDLER_COUNT,
         DEFAULT_TSS_SERVER_HANDLER_COUNT);
     RpcServer server = HBaseRPC.getServer(tsm,
         new Class<?>[] { TimestampManagerServer.class },
-        initialIsa.getHostName(), initialIsa.getPort(), numHandlers, 0,
+        isa.getHostName(), isa.getPort(), numHandlers, 0,
         conf.getBoolean("hbase.rpc.verbose", false), conf, 0);
     return server;
   }
@@ -55,7 +56,9 @@ public class TimestampServer implements Runnable {
     Runtime.getRuntime().addShutdownHook(new Thread() {
       @Override
       public void run() {
-        tms.notify();
+        synchronized (tms) {
+          tms.notify();
+        }
       }
     });
     tms.run();
