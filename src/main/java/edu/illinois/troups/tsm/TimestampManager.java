@@ -5,6 +5,8 @@ import java.util.Comparator;
 
 public interface TimestampManager extends Comparator<Long> {
 
+  public static final long VERSION = 1L;
+
   public interface TimestampListener {
     void released(long ts);
   }

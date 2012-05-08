@@ -24,6 +24,7 @@ import org.apache.commons.logging.LogFactory;
 import edu.illinois.troups.tm.Key;
 import edu.illinois.troups.tm.KeyVersions;
 import edu.illinois.troups.tm.NotEnoughVersionsException;
+import edu.illinois.troups.tm.RetryReadException;
 import edu.illinois.troups.tm.TID;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.log.TransactionLog;
@@ -246,7 +247,6 @@ class MVTOTransaction<K extends Key> {
   public final void afterGet(int numVersionsRetrieved,
       Iterable<? extends KeyVersions<K>> kvs)
       throws TransactionAbortedException, IOException {
-    boolean aborted = false;
     /*
      * First acquire read locks for all the keys we are about to scan: We don't
      * want a writer coming in on a key while we decide which version to pick,
@@ -319,10 +319,7 @@ class MVTOTransaction<K extends Key> {
                 if (lastWrite != null
                     && tm.getTimestampManager().compare(lastWrite.id.getTS(),
                         version) > 0) {
-                  tm.readUnlock(lockedKeys);
-                  aborted = true;
-                  abort();
-                  throw new TransactionAbortedException("Read conflict");
+                  throw new RetryReadException();
                 }
               }
 
@@ -351,8 +348,7 @@ class MVTOTransaction<K extends Key> {
           }
         }
       } finally {
-        if (!aborted)
-          tm.readUnlock(lockedKeys);
+        tm.readUnlock(lockedKeys);
       }
     } finally {
       ThreadLocalStopWatch.stop();

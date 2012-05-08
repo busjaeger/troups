@@ -89,6 +89,7 @@ import edu.illinois.troups.tm.region.log.HTableLogStore;
 import edu.illinois.troups.tsm.SharedTimestampManager;
 import edu.illinois.troups.tsm.TimestampManager.TimestampReclamationListener;
 import edu.illinois.troups.tsm.TimestampReclaimer;
+import edu.illinois.troups.tsm.server.TimestampManagerServerClient;
 import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKTimestampReclaimer;
@@ -100,9 +101,6 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
     TimestampReclamationListener, KeyValueStore<HKey> {
 
   public static final Log LOG = LogFactory.getLog(HRegion.class);
-
-  // KeyValue.KEY_COMPARATOR
-  // .getComparatorIgnoringTimestamps();
 
   private final ConcurrentMap<HKey, MVTOXATransactionManager<HKey, HRecord>> tms = new ConcurrentHashMap<HKey, MVTOXATransactionManager<HKey, HRecord>>();
   private boolean started = false;
@@ -116,7 +114,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
   private TimestampReclaimer collector;
   private volatile Long lastReclaimedTimestamp;
 
-  // temporary to measure response time
+  // used to measure response time of different APIs
   private Times beginTimes;
   private Times commitTimes;
   private Times abortTimes;
@@ -210,9 +208,9 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       collector = new TimestampReclaimer((Runnable) tsm, conf, pool, zkw);
       break;
     case TSS_IMPL_VALUE_SERVER:
-      // TODO
-      throw new UnsupportedOperationException(
-          "currently don't support server TSS");
+      LOG.info("TSM: Server");
+      tsm = new TimestampManagerServerClient(conf, pool);
+      break;
     }
 
     // create a log store
@@ -292,7 +290,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
         logDir = "";
       try {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd_HH:mm:ss");
-        String prefix = "times." + sdf.format(new Date()) +".";
+        String prefix = "times." + sdf.format(new Date()) + ".";
         preGetTimes.write(new File(logDir, prefix + "preGet.log"));
         postGetTimes.write(new File(logDir, prefix + "postGet.log"));
         prePutTimes.write(new File(logDir, prefix + "prePut.log"));

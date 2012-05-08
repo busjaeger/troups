@@ -4,6 +4,8 @@ import java.io.IOException;
 
 public interface SharedTimestampManager extends TimestampManager {
 
+  public static final long VERSION = 1L;
+
   // note: could return SharedTimestampManager here to make it recursive
   /**
    * Creates a new shared timestamp. The timestamp has an implicit owner

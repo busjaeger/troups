@@ -12,6 +12,7 @@ import org.apache.hadoop.hbase.util.Bytes;
 import edu.illinois.troups.client.tm.RowGroupPolicy;
 import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.tm.NotEnoughVersionsException;
+import edu.illinois.troups.tm.RetryReadException;
 import edu.illinois.troups.tm.TransactionAbortedException;
 
 public class HTable implements Closeable {
@@ -45,6 +46,8 @@ public class HTable implements Closeable {
         return new Result(result.getNoVersionMap());
       } catch (NotEnoughVersionsException e) {
         maxVersions *= 2;
+        continue;
+      } catch (RetryReadException e) {
         continue;
       } catch (RetriesExhaustedWithDetailsException e) {
         throw unrwap(e);

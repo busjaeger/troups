@@ -21,6 +21,7 @@ import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tsm.SharedTimestampManager;
+import edu.illinois.troups.tsm.server.TimestampManagerServerClient;
 import edu.illinois.troups.tsm.table.HTableSharedTimestampManager;
 import edu.illinois.troups.tsm.zk.ZKSharedTimestampManager;
 
@@ -44,7 +45,8 @@ public class TransactionManagerClient extends TransactionManager {
           new HTablePool(), null);
       break;
     default:
-      throw new IllegalStateException("Unknown TSS implementation " + tssImpl);
+      this.stsm = new TimestampManagerServerClient(conf, null);
+      break;
     }
     int numThreads = conf.getInt(CLIENT_THREAD_COUNT,
         DEFAULT_CLIENT_THREAD_COUNT);

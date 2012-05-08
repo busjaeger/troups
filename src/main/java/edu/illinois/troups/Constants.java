@@ -71,6 +71,22 @@ public interface Constants {
 
   public static final String DEFAULT_ZOOKEEPER_ZNODE_LRT = "lrt";
 
+  // Timestamp service server properties
+
+  public static final String TSS_SERVER_NAME = "troups.tss.server.name";
+
+  public static final String TSS_SERVER_PORT = "troups.tss.server.port";
+
+  public static final int DEFAULT_TSS_SERVER_PORT = 60100;
+
+  public static final String TSS_SERVER_HANDLER_COUNT = "troups.tss.server.handler.count";
+
+  public static final int DEFAULT_TSS_SERVER_HANDLER_COUNT = 30;
+
+  public static final String TSS_SERVER_BATCH_SIZE = "troups.tss.server.batch.size";
+
+  public static final long DEFAULT_TSS_SERVER_BATCH_SIZE = 100000l;
+  
   // Log configuration properties
 
   // note: currently only table works
