@@ -31,8 +31,6 @@ public class GroupTransaction extends AbstractTransaction implements
 
     // if this is the first enlist -> begin transaction
     if (this.group == null) {
-      if (policy == null)
-        policy = RowGroupPolicy.newInstance(table);
       if (policy != null)
         row = policy.getGroupKey(row);
       RowGroup group = new RowGroup(table, row);

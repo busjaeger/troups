@@ -1,8 +1,11 @@
 package edu.illinois.troups.perf;
 
+import static edu.illinois.troups.util.perf.ThreadLocalStopWatch.start;
+import static edu.illinois.troups.util.perf.ThreadLocalStopWatch.stop;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.util.Random;
 
 import org.apache.hadoop.conf.Configuration;
@@ -21,6 +24,8 @@ import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.region.HRegionTransactionManager;
+import edu.illinois.troups.util.perf.ThreadLocalStopWatch;
+import edu.illinois.troups.util.perf.Times;
 
 public class RandomRowTransactions {
 
@@ -35,12 +40,12 @@ public class RandomRowTransactions {
     this.admin = admin;
   }
 
-  void start() throws Exception {
+  void before() throws Exception {
     HTableDescriptor desc = new HTableDescriptor(tableName);
     desc.addFamily(new HColumnDescriptor(familyName));
     desc.addFamily(new HColumnDescriptor(logFamily));
     desc.addCoprocessor(HRegionTransactionManager.class.getName());
-//    desc.setValue(Constants.TM_LOG_FAMILY_NAME, logFamily);
+    // desc.setValue(Constants.TM_LOG_FAMILY_NAME, logFamily);
     try {
       admin.createTable(desc);
     } catch (TableExistsException e) {
@@ -57,7 +62,7 @@ public class RandomRowTransactions {
     t.close();
   }
 
-  void stop() throws Exception {
+  void after() throws Exception {
     admin.disableTable(tableName);
     admin.deleteTable(tableName);
   }
@@ -68,61 +73,70 @@ public class RandomRowTransactions {
     TransactionManager tm = TransactionManager.get(conf);
     Random rand = new Random();
 
-    long gett = 0, putt = 0, tt = 0, begint = 0, committ = 0;
-    int num = 1000;
-    long now;
-    long before, beforeOp, beforeCommit;
+    Times times = new Times();
+    int num = 300;
     int abortCount = 0;
     long failureCount = 0;
     for (int i = 0; i < num; i++) {
+
       long rowID = rand.nextLong();
       byte[] row = Bytes.toBytes(rowID);
 
-      now = System.currentTimeMillis();
-      before = now;
-      Transaction ta = tm.begin();
-      now = System.currentTimeMillis();
-      begint += (now - before);
+      ThreadLocalStopWatch.start(times);
       try {
-        beforeOp = now;
-        Get get = new Get(row);
-        get.addColumn(familyName, qualifierName);
-        table.get(ta, get);
-        now = System.currentTimeMillis();
-        gett += (now - beforeOp);
+        Transaction ta;
+        start("begin");
+        try {
+          ta = tm.begin();
+        } finally {
+          stop();
+        }
+        try {
+          start("get");
+          try {
+            Get get = new Get(row);
+            get.addColumn(familyName, qualifierName);
+            table.get(ta, get);
+          } finally {
+            stop();
+          }
 
-        beforeOp = now;
-        Put put = new Put(row);
-        put.add(familyName, qualifierName, new byte[1024]);
-        table.put(ta, put);
-        now = System.currentTimeMillis();
-        putt += (now - beforeOp);
+          start("put");
+          try {
+            Put put = new Put(row);
+            put.add(familyName, qualifierName, new byte[1024]);
+            table.put(ta, put);
+          } finally {
+            stop();
+          }
 
-        beforeCommit = now;
-        ta.commit();
-        now = System.currentTimeMillis();
-        committ += (now - beforeCommit);
+          start("commit");
+          try {
+            ta.commit();
+          } finally {
+            stop();
+          }
 
-        tt += (now - before);
-      } catch (TransactionAbortedException e) {
-        abortCount++;
-      } catch (Exception e) {
-        e.printStackTrace(System.out);
-        failureCount++;
-        ta.rollback();
+        } catch (TransactionAbortedException e) {
+          abortCount++;
+        } catch (Exception e) {
+          e.printStackTrace(System.out);
+          failureCount++;
+          ta.rollback();
+        }
+      } finally {
+        ThreadLocalStopWatch.stop(times);
       }
 
       if (i % 100 == 0)
         System.out.println("100 times");
     }
-
-    System.out.println("Average total: " + (tt / num));
-    System.out.println("Average get: " + (gett / num));
-    System.out.println("Average put: " + (putt / num));
-    System.out.println("Average begin: " + (begint / num));
-    System.out.println("Average commit: " + (committ / num));
     System.out.println("Count abort: " + abortCount);
     System.out.println("Count failure: " + failureCount);
+
+    OutputStreamWriter writer = new OutputStreamWriter(System.out);
+    times.write(writer);
+    writer.flush();
   }
 
   public static void main(String[] args) throws Exception,
@@ -130,11 +144,11 @@ public class RandomRowTransactions {
     Configuration conf = HBaseConfiguration.create();
     HBaseAdmin admin = new HBaseAdmin(conf);
     RandomRowTransactions rr = new RandomRowTransactions(admin);
-    rr.start();
+    rr.before();
     try {
       rr.run();
     } finally {
-      rr.stop();
+      rr.after();
     }
   }
 }

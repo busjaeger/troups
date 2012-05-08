@@ -34,10 +34,14 @@ public class Times {
   public void write(File file) throws IOException {
     FileWriter writer = new FileWriter(file, true);
     try {
-      write(0, writer, "root");
+      write(writer);
     } finally {
       writer.close();
     }
+  }
+
+  public void write(Writer writer) throws IOException {
+    write(0, writer, "root");
   }
 
   private void write(int tabs, Writer writer, String id) throws IOException {

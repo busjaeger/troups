@@ -12,7 +12,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 
 import org.apache.hadoop.hbase.client.HTable;
-import org.apache.hadoop.hbase.util.Bytes;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
@@ -40,7 +39,6 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
   // mutable state
   private TID id;
   private final Map<RowGroup, XID> groups = new HashMap<RowGroup, XID>();
-  private final Map<String, RowGroupPolicy> policies = new HashMap<String, RowGroupPolicy>();
   private State state;
 
   CrossGroupTransaction(SharedTimestampManager tsm, ExecutorService pool) {
@@ -77,9 +75,8 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
     }
 
     // determine row group
-    RowGroupPolicy strategy = getPolicy(table, policy);
-    if (strategy != null)
-      row = strategy.getGroupKey(row);
+    if (policy != null)
+      row = policy.getGroupKey(row);
     RowGroup group = new RowGroup(table, row);
 
     // this is a new row group -> enlist RTM in transaction
@@ -322,15 +319,4 @@ class CrossGroupTransaction extends AbstractTransaction implements Transaction {
     return id.getTS() + " (" + state + ") " + groups.toString();
   }
 
-  private RowGroupPolicy getPolicy(HTable table, RowGroupPolicy policy) {
-    byte[] bName = table.getTableName();
-    String name = Bytes.toString(bName);
-    RowGroupPolicy strategy = policies.get(name);
-    if (strategy == null) {
-      if (policy == null)
-        policy = RowGroupPolicy.newInstance(table);
-      policies.put(name, strategy = policy);
-    }
-    return strategy;
-  }
 }
