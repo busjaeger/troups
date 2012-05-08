@@ -1,5 +1,7 @@
 package edu.illinois.troups.perf;
 
+import static edu.illinois.troups.util.perf.ThreadLocalStopWatch.start;
+import static edu.illinois.troups.util.perf.ThreadLocalStopWatch.stop;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
@@ -25,6 +27,7 @@ import edu.illinois.troups.client.tm.Transaction;
 import edu.illinois.troups.client.tm.TransactionManager;
 import edu.illinois.troups.tm.TransactionAbortedException;
 import edu.illinois.troups.tm.region.HRegionTransactionManager;
+import edu.illinois.troups.util.perf.Times;
 
 public class SingleRowTransactions {
 
@@ -39,7 +42,7 @@ public class SingleRowTransactions {
     this.admin = admin;
   }
 
-  void start() throws Exception {
+  void before() throws Exception {
     HTableDescriptor desc = new HTableDescriptor(tableName);
     desc.addFamily(new HColumnDescriptor(familyName));
     desc.addCoprocessor(HRegionTransactionManager.class.getName());
@@ -60,7 +63,7 @@ public class SingleRowTransactions {
     t.close();
   }
 
-  void stop() throws Exception {
+  void after() throws Exception {
     admin.disableTable(tableName);
     admin.deleteTable(tableName);
   }
@@ -70,80 +73,81 @@ public class SingleRowTransactions {
     HTable table = new HTable(conf, tableName);
     TransactionManager tm = TransactionManager.get(conf);
 
-    long gett = 0, putt = 0, tt = 0, begint = 0, committ = 0;
+    Times times = new Times();
     int num = 100;
-    long now;
-    long before, beforeOp, beforeCommit;
     int abortCount = 0;
     long failureCount = 0;
     for (int i = 0; i < num; i++) {
-      now = System.currentTimeMillis();
-      before = now;
-      Transaction ta = tm.begin();
-      now = System.currentTimeMillis();
-      begint += (now - before);
+      start(times);
       try {
-        beforeOp = now;
+        Transaction ta;
+        start("begin");
         try {
-          Get get = new Get(row);
-          get.addColumn(familyName, qualifierName);
-          table.get(ta, get);
+          ta = tm.begin();
         } finally {
-          now = System.currentTimeMillis();
-          gett += (now - beforeOp);
+          stop();
         }
-
-        if (i % 20 == 0) {
-          beforeOp = now;
+        try {
+          start("get");
           try {
-            Put put = new Put(row);
-            put.add(familyName, qualifierName, new byte[1024]);
-            table.put(ta, put);
+            Get get = new Get(row);
+            get.addColumn(familyName, qualifierName);
+            table.get(ta, get);
           } finally {
-            now = System.currentTimeMillis();
-            putt += (now - beforeOp);
+            stop();
           }
-        }
 
-        beforeCommit = now;
-        try {
-          ta.commit();
-        } finally {
-          now = System.currentTimeMillis();
-          committ += (now - beforeCommit);
-        }
+          if (i % 20 == 0) {
+            start("put");
+            try {
+              Put put = new Put(row);
+              put.add(familyName, qualifierName, new byte[1024]);
+              table.put(ta, put);
+            } finally {
+              stop();
+            }
+          }
 
-      } catch (TransactionAbortedException e) {
-        abortCount++;
-      } catch (Exception e) {
-        e.printStackTrace(System.out);
-        failureCount++;
-        ta.rollback();
+          start("commit");
+          try {
+            ta.commit();
+          } finally {
+            stop();
+          }
+
+        } catch (TransactionAbortedException e) {
+          abortCount++;
+        } catch (Exception e) {
+          e.printStackTrace(System.out);
+          failureCount++;
+          ta.rollback();
+        }
       } finally {
-        tt += (now - before);
+        stop(times);
       }
 
       if (i != 0 && i % 10 == 0)
         System.out.println("10 times");
     }
 
-    System.out.println("Average total: " + (tt / num));
-    System.out.println("Average get: " + (gett / num));
-    System.out.println("Average put: " + (putt / num));
-    System.out.println("Average begin: " + (begint / num));
-    System.out.println("Average commit: " + (committ / num));
     System.out.println("Count abort: " + abortCount);
     System.out.println("Count failure: " + failureCount);
+    times.write(System.out);
   }
 
   public static void main(String[] args) throws Exception,
       ZooKeeperConnectionException {
+    int num;
+    if (args.length > 0)
+      num = Integer.parseInt(args[0]);
+    else
+      num = 1;
+
     Configuration conf = HBaseConfiguration.create();
     HBaseAdmin admin = new HBaseAdmin(conf);
     final SingleRowTransactions sr = new SingleRowTransactions(admin);
-    sr.start();
+    sr.before();
     try {
-      int num = 10;
       ExecutorService pool = Executors.newFixedThreadPool(100);
       ArrayList<Future<Void>> fs = new ArrayList<Future<Void>>(num);
       for (int i = 0; i < num; i++)
@@ -158,7 +162,7 @@ public class SingleRowTransactions {
         future.get();
       pool.shutdown();
     } finally {
-      sr.stop();
+      sr.after();
     }
   }
 

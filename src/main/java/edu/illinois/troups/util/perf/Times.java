@@ -3,6 +3,8 @@ package edu.illinois.troups.util.perf;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.PrintStream;
 import java.io.Writer;
 import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,6 +44,12 @@ public class Times {
 
   public void write(Writer writer) throws IOException {
     write(0, writer, "root");
+  }
+
+  public void write(PrintStream stream) throws IOException {
+    OutputStreamWriter os = new OutputStreamWriter(stream);
+    write(os);
+    os.flush();
   }
 
   private void write(int tabs, Writer writer, String id) throws IOException {

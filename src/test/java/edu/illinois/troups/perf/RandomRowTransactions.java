@@ -5,7 +5,6 @@ import static edu.illinois.troups.util.perf.ThreadLocalStopWatch.stop;
 import static org.apache.hadoop.hbase.util.Bytes.toBytes;
 
 import java.io.IOException;
-import java.io.OutputStreamWriter;
 import java.util.Random;
 
 import org.apache.hadoop.conf.Configuration;
@@ -134,9 +133,7 @@ public class RandomRowTransactions {
     System.out.println("Count abort: " + abortCount);
     System.out.println("Count failure: " + failureCount);
 
-    OutputStreamWriter writer = new OutputStreamWriter(System.out);
-    times.write(writer);
-    writer.flush();
+    times.write(System.out);
   }
 
   public static void main(String[] args) throws Exception,
