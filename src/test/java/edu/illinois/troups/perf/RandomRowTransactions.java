@@ -75,6 +75,7 @@ public class RandomRowTransactions {
     TransactionManager tm = TransactionManager.get(conf);
     Random rand = new Random();
 
+    long before = System.currentTimeMillis();
     Times times = new Times();
     int abortCount = 0;
     long failureCount = 0;
@@ -134,6 +135,9 @@ public class RandomRowTransactions {
     }
     System.out.println("Count abort: " + abortCount);
     System.out.println("Count failure: " + failureCount);
+    long total = System.currentTimeMillis() - before;
+    System.out.println("ran " + num + " transactions in " + total
+        + " milliseconds");
 
     times.write(System.out);
   }

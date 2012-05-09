@@ -58,6 +58,7 @@ public class RandomRow {
     HTable table = new HTable(admin.getConfiguration(), tableName);
     Random rand = new Random();
 
+    long before = System.currentTimeMillis();
     Times times = new Times();
     for (int i = 0; i < num; i++) {
       long rowID = rand.nextLong();
@@ -65,7 +66,7 @@ public class RandomRow {
 
       ThreadLocalStopWatch.start(times);
       try {
-        start("begin");
+        start("get");
         try {
           Get get = new Get(row);
           get.addColumn(familyName, qualifierName);
@@ -74,7 +75,7 @@ public class RandomRow {
           stop();
         }
 
-        start("begin");
+        start("put");
         try {
           Put put = new Put(row);
           put.add(familyName, qualifierName, new byte[1024]);
@@ -89,6 +90,8 @@ public class RandomRow {
       if (i % 100 == 0)
         System.out.println("100 times");
     }
+    long total = System.currentTimeMillis() - before;
+    System.out.println("ran "+num+" transactions in "+total+" milliseconds");
     times.write(System.out);
   }
 
