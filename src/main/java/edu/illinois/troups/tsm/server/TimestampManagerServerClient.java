@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.ipc.HBaseRPC;
 
 import edu.illinois.troups.tsm.NoSuchTimestampException;
@@ -27,6 +28,14 @@ public class TimestampManagerServerClient implements SharedTimestampManager {
 
   private static final Log LOG = LogFactory
       .getLog(TimestampManagerServerClient.class);
+
+  // for tesing purposes
+  public static void main(String[] args) throws IOException {
+    Configuration conf = HBaseConfiguration.create();
+    TimestampManagerServerClient client = new TimestampManagerServerClient(
+        conf, null);
+    System.out.println("Acquired timestamp: "+client.acquire());
+  }
 
   private final TimestampManagerServer proxy;
   private final ScheduledExecutorService pool;

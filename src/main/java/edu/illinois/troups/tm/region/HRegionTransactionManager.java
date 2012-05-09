@@ -357,7 +357,7 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       Iterable<HKey> keys = Iterables.concat(Iterables.transform(put
           .getFamilyMap().values(), HRegionTransactionManager
           .<KeyValue, HKey> map(HKey.KEYVALUE_TO_KEY)));
-      getTM(groupKey).beforePut(tid, keys);
+      getTM(groupKey).afterPut(tid, keys);
     } finally {
       ThreadLocalStopWatch.stop(postPutTimes);
     }
@@ -688,14 +688,18 @@ public class HRegionTransactionManager extends BaseRegionObserver implements
       byte[] familyName) throws IOException {
     // create log table if necessary
     HBaseAdmin admin = new HBaseAdmin(conf);
-    if (!admin.tableExists(tableName)) {
-      HTableDescriptor descr = new HTableDescriptor(tableName);
-      descr.addFamily(new HColumnDescriptor(familyName));
-      try {
-        admin.createTable(descr);
-      } catch (TableExistsException e) {
-        // ignore: concurrent creation
+    try {
+      if (!admin.tableExists(tableName)) {
+        HTableDescriptor descr = new HTableDescriptor(tableName);
+        descr.addFamily(new HColumnDescriptor(familyName));
+        try {
+          admin.createTable(descr);
+        } catch (TableExistsException e) {
+          // ignore: concurrent creation
+        }
       }
+    } finally {
+      admin.close();
     }
   }
 

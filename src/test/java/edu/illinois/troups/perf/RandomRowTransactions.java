@@ -28,15 +28,18 @@ import edu.illinois.troups.util.perf.Times;
 
 public class RandomRowTransactions {
 
-  private static final byte[] tableName = toBytes("account");
   private static final byte[] familyName = toBytes("balance");
   private static final byte[] qualifierName = toBytes("main");
   private static final String logFamily = "log";
 
   private final HBaseAdmin admin;
+  private final int num;
+  private final byte[] tableName;
 
-  public RandomRowTransactions(HBaseAdmin admin) {
+  public RandomRowTransactions(HBaseAdmin admin, int num, String tableName) {
     this.admin = admin;
+    this.num = num;
+    this.tableName = Bytes.toBytes(tableName);
   }
 
   void before() throws Exception {
@@ -73,7 +76,6 @@ public class RandomRowTransactions {
     Random rand = new Random();
 
     Times times = new Times();
-    int num = 300;
     int abortCount = 0;
     long failureCount = 0;
     for (int i = 0; i < num; i++) {
@@ -138,9 +140,17 @@ public class RandomRowTransactions {
 
   public static void main(String[] args) throws Exception,
       ZooKeeperConnectionException {
+    int repititions = 1000;
+    String tableName = "account";
+    if (args.length > 0)
+      tableName = args[0];
+    if (args.length > 1)
+      repititions = Integer.parseInt(args[1]);
+
     Configuration conf = HBaseConfiguration.create();
     HBaseAdmin admin = new HBaseAdmin(conf);
-    RandomRowTransactions rr = new RandomRowTransactions(admin);
+    RandomRowTransactions rr = new RandomRowTransactions(admin, repititions,
+        tableName);
     rr.before();
     try {
       rr.run();
