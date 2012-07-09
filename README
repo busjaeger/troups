@@ -27,5 +27,5 @@ HBASE_HOME: directory that contains HBase binaries
   bin/start-hbase.sh
 
 7. run test case
-  bin/hbase edu.illinois.troups.client.SingleTableTest
+  bin/hbase edu.illinois.troups.itest.SingleTableTest
   (last printed line should be: 'succeeded')
